@@ -45,6 +45,11 @@ float    sample_depth_m  = 2.0;    // Sample depth (metres, 0–2)
 unsigned long flush_time_ms = 30000;  // Flush pump duration (ms, default 30s)
 unsigned long fill_time_ms  = 30000;  // Bottle-fill pump duration (ms, default 30s)
 
+// -------------------- No-Sampler Mode --------------------
+bool isWaterSamplerOnBoard = true;     // true = use Arduino Uno, false = simulate sampling
+unsigned long skipSampleDelay = 10000; // Simulated sample hold time (ms, default 10s)
+unsigned long skipSampleStart = 0;     // Internal: timestamp for non-blocking skip
+
 // -------------------- PWM Channels --------------------
 const int pwmPinA = 4;         // Servo pin for left motor
 const int pwmPinB = 14;        // Servo pin for right motor
@@ -524,6 +529,20 @@ canvas{border-radius:50%;border:2px solid var(--border2);background:var(--surfac
         <button class="padj" onclick="adjustInterval(1)">+</button>
         <button class="pset" onclick="commitInterval()">Set</button>
       </div>
+
+      <div class="sec-label">Water Sampler</div>
+      <div class="param-row">
+        <span class="pname">Sampler On Board</span>
+        <button class="pset" id="wsOn"  onclick="toggleSampler(true)">ON</button>
+        <button class="pset" id="wsOff" onclick="toggleSampler(false)">OFF</button>
+      </div>
+      <div class="param-row">
+        <span class="pname">Skip Delay (s)</span>
+        <button class="padj" onclick="updateParam('skipDelay',-1)">-</button>
+        <input class="pinp" type="number" id="skipDelay" min="1" max="120" value="10">
+        <button class="padj" onclick="updateParam('skipDelay',1)">+</button>
+        <button class="pset" onclick="setParam('SST',document.getElementById('skipDelay').value)">Set</button>
+      </div>
     </div>
   </div>
 </div>
@@ -722,6 +741,13 @@ function setParam(l, v) {
   localStorage.setItem(l, v);
 }
 
+function toggleSampler(on) {
+  fetch('/WS:' + (on ? '1' : '0')).catch(() => {});
+  localStorage.setItem('WS', on ? '1' : '0');
+  document.getElementById('wsOn').style.background  = on  ? '#4CAF50' : '';
+  document.getElementById('wsOff').style.background = !on ? '#f44336' : '';
+}
+
 function updateParam(id, d) {
   const i = document.getElementById(id);
   let v = parseFloat(i.value) + d;
@@ -746,6 +772,11 @@ function loadParams() {
   if (storedNS) document.getElementById('missionSamples').value = storedNS;
   const storedSD = localStorage.getItem('SD');
   if (storedSD) document.getElementById('missionDepth').value = storedSD;
+  const storedWS  = localStorage.getItem('WS');
+  if (storedWS !== null) toggleSampler(storedWS === '1');
+  const storedSST = localStorage.getItem('SST');
+  if (storedSST && document.getElementById('skipDelay'))
+    document.getElementById('skipDelay').value = storedSST;
 }
 
 const canvas = document.getElementById('joystick');
@@ -1053,6 +1084,7 @@ void handleCommand(char cmd) {
         manualMode = false;
         autonomousMode = false;
         sampling = false;
+        skipSampleStart = 0;
         Serial2.print(":C1\n");  // Task 2
         return;
     }
@@ -1258,6 +1290,12 @@ void handleCommandPath() {
             fill_time_ms = (unsigned long)constrain(msg.substring(3).toInt(), 0, 60) * 1000;
             Serial.println("Fill time: " + String(fill_time_ms / 1000) + "s");
             Serial2.print(":BT" + String(fill_time_ms / 1000) + "\n");
+        } else if (msg.startsWith("WS:")) {
+            isWaterSamplerOnBoard = (msg.substring(3).toInt() == 1);
+            Serial.println("Water Sampler on board: " + String(isWaterSamplerOnBoard ? "YES" : "NO"));
+        } else if (msg.startsWith("SST:")) {
+            skipSampleDelay = (unsigned long)constrain(msg.substring(4).toInt(), 1, 120) * 1000;
+            Serial.println("Skip Sample Delay: " + String(skipSampleDelay / 1000) + "s");
         }
     }
     server.send(200, "text/plain", "OK");
@@ -1338,7 +1376,35 @@ void loop() {
             handleStuckNonBlocking();
         } else if (sampling) {
             stopCar();
-            performAutoSample();
+            if (isWaterSamplerOnBoard) {
+                performAutoSample();                          // unchanged path
+            } else {
+                // Non-blocking simulated sample
+                if (skipSampleStart == 0) {
+                    if (sample_count >= sample_max) {         // mirror safety check in performAutoSample()
+                        Serial.println("Max samples reached, exiting autonomous mode");
+                        autonomousMode = false; stopMode = true; sampling = false;
+                    } else {
+                        skipSampleStart = millis();
+                        arduinoState = "Auto Sampling...";    // GUI countdown pauses on this state
+                        Serial.println("No sampler - simulating sample "
+                            + String(sample_count + 1) + "/" + String(sample_max)
+                            + ", delay " + String(skipSampleDelay / 1000) + "s");
+                    }
+                } else if (millis() - skipSampleStart >= skipSampleDelay) {
+                    sample_count++;
+                    sampleStart     = millis();
+                    sampling        = false;
+                    skipSampleStart = 0;
+                    arduinoState    = "Sample Done";          // GUI countdown resets on this state
+                    Serial.println("Simulated sample done: "
+                        + String(sample_count) + "/" + String(sample_max));
+                    if (sample_count >= sample_max) {
+                        Serial.println("All simulated samples complete, stopping");
+                        autonomousMode = false; stopMode = true; stopCar();
+                    }
+                }
+            }
         } else {
             moveForwardAutonomous();
             int switchHit = checkSwitches();
