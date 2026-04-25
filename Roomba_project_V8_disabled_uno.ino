@@ -52,6 +52,7 @@ unsigned long fill_time_ms  = 30000;  // Bottle-fill pump duration (ms, default 
 // full Arduino handshake (byte-identical to master).
 bool platform_sample_on_board = false;                    // DEFAULT FALSE on this branch
 const unsigned long replace_water_sample_delay = 15;      // Self-ack delay in SECONDS
+const unsigned long reverse_after_sample_duration = 7;    // Reverse-motor duration in SECONDS at sample start (always applies)
 
 // -------------------- PWM Channels --------------------
 const int pwmPinA = 4;         // Servo pin for left motor
@@ -883,6 +884,11 @@ void performAutoSample() {
                                               // flush(30s) + depth(~67s) + pumps(30s)
                                               // + turns(~10s) + 63s safety margin
 
+    // --- Reverse motors briefly to kill forward momentum (always, at sample start) ---
+    Serial.println("Reversing motors for " + String(reverse_after_sample_duration) + "s before sample wait");
+    moveBackward();
+    bool reverseHandled = false;
+
     Serial.println("Waiting for Arduino response (:X1)...");
 
     // Loop until Timeout OR Stop button is pressed
@@ -890,6 +896,14 @@ void performAutoSample() {
 
         // CRITICAL: Keep GUI alive and responsive
         server.handleClient();
+
+        // --- End reverse phase after configured duration (always applies) ---
+        if (!reverseHandled &&
+            (millis() - waitStart) >= (reverse_after_sample_duration * 1000UL)) {
+            stopCar();
+            reverseHandled = true;
+            Serial.println("Reverse phase complete, motors stopped");
+        }
 
         // --- Self-ack when Arduino is not on board ---
         if (!platform_sample_on_board &&
