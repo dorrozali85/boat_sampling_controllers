@@ -51,8 +51,8 @@ unsigned long fill_time_ms  = 30000;  // Bottle-fill pump duration (ms, default 
 // Arduino Uno response. GUI code is unchanged. Flip to true + re-flash to restore the
 // full Arduino handshake (byte-identical to master).
 bool platform_sample_on_board = false;                    // DEFAULT FALSE on this branch
-const unsigned long replace_water_sample_delay = 15;      // Self-ack delay in SECONDS
-const unsigned long reverse_after_sample_duration = 7;    // Reverse-motor duration in SECONDS at sample start (always applies)
+unsigned long replace_water_sample_delay = 15;      // Self-ack delay in SECONDS (configurable via GUI: SST:)
+unsigned long reverse_after_sample_duration = 7;    // Reverse-motor duration in SECONDS (configurable via GUI: RSD:)
 
 // -------------------- PWM Channels --------------------
 const int pwmPinA = 4;         // Servo pin for left motor
@@ -533,6 +533,27 @@ canvas{border-radius:50%;border:2px solid var(--border2);background:var(--surfac
         <button class="padj" onclick="adjustInterval(1)">+</button>
         <button class="pset" onclick="commitInterval()">Set</button>
       </div>
+
+      <div class="sec-label">Water Sampler</div>
+      <div class="param-row">
+        <span class="pname">Sampler On Board</span>
+        <button class="pset" id="wsOn"  onclick="toggleSampler(true)">ON</button>
+        <button class="pset" id="wsOff" onclick="toggleSampler(false)">OFF</button>
+      </div>
+      <div class="param-row">
+        <span class="pname">Self-Ack Delay (s)</span>
+        <button class="padj" onclick="updateParam('sstDelay',-1)">-</button>
+        <input class="pinp" type="number" id="sstDelay" min="1" max="120" value="15">
+        <button class="padj" onclick="updateParam('sstDelay',1)">+</button>
+        <button class="pset" onclick="setParam('SST',document.getElementById('sstDelay').value)">Set</button>
+      </div>
+      <div class="param-row">
+        <span class="pname">Reverse Duration (s)</span>
+        <button class="padj" onclick="updateParam('rsdDelay',-1)">-</button>
+        <input class="pinp" type="number" id="rsdDelay" min="0" max="30" value="7">
+        <button class="padj" onclick="updateParam('rsdDelay',1)">+</button>
+        <button class="pset" onclick="setParam('RSD',document.getElementById('rsdDelay').value)">Set</button>
+      </div>
     </div>
   </div>
 </div>
@@ -731,6 +752,13 @@ function setParam(l, v) {
   localStorage.setItem(l, v);
 }
 
+function toggleSampler(on) {
+  fetch('/WS:' + (on ? '1' : '0')).catch(() => {});
+  localStorage.setItem('WS', on ? '1' : '0');
+  document.getElementById('wsOn').style.background  = on  ? '#4CAF50' : '';
+  document.getElementById('wsOff').style.background = !on ? '#f44336' : '';
+}
+
 function updateParam(id, d) {
   const i = document.getElementById(id);
   let v = parseFloat(i.value) + d;
@@ -755,6 +783,14 @@ function loadParams() {
   if (storedNS) document.getElementById('missionSamples').value = storedNS;
   const storedSD = localStorage.getItem('SD');
   if (storedSD) document.getElementById('missionDepth').value = storedSD;
+  const storedWS  = localStorage.getItem('WS');
+  if (storedWS !== null) toggleSampler(storedWS === '1');
+  const storedSST = localStorage.getItem('SST');
+  if (storedSST && document.getElementById('sstDelay'))
+    document.getElementById('sstDelay').value = storedSST;
+  const storedRSD = localStorage.getItem('RSD');
+  if (storedRSD && document.getElementById('rsdDelay'))
+    document.getElementById('rsdDelay').value = storedRSD;
 }
 
 const canvas = document.getElementById('joystick');
@@ -1290,6 +1326,15 @@ void handleCommandPath() {
             fill_time_ms = (unsigned long)constrain(msg.substring(3).toInt(), 0, 60) * 1000;
             Serial.println("Fill time: " + String(fill_time_ms / 1000) + "s");
             Serial2.print(":BT" + String(fill_time_ms / 1000) + "\n");
+        } else if (msg.startsWith("WS:")) {
+            platform_sample_on_board = (msg.substring(3).toInt() == 1);
+            Serial.println("Platform sample on board: " + String(platform_sample_on_board ? "YES" : "NO"));
+        } else if (msg.startsWith("SST:")) {
+            replace_water_sample_delay = (unsigned long)constrain(msg.substring(4).toInt(), 1, 120);
+            Serial.println("Self-ack delay: " + String(replace_water_sample_delay) + "s");
+        } else if (msg.startsWith("RSD:")) {
+            reverse_after_sample_duration = (unsigned long)constrain(msg.substring(4).toInt(), 0, 30);
+            Serial.println("Reverse after sample: " + String(reverse_after_sample_duration) + "s");
         }
     }
     server.send(200, "text/plain", "OK");
