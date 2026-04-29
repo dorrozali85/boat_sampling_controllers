@@ -35,10 +35,17 @@ unsigned long lastFwdPrint = 0;
 
 // New tunable parameters
 unsigned long debounce_ms = 30;        // Debounce time (ms)
-unsigned long min_turn_ms = 3000;      // Min turn time (ms)
-unsigned long max_turn_ms = 6000;      // Max turn time (ms)
 unsigned long forward_lock_ms = 2000;  // Forward lock time (ms)
 unsigned long sample_interval_ms = 60000; // Sample interval (ms, default 1 min)
+
+// -------------------- Magnetometer Heading Navigation --------------------
+unsigned long min_turn_angle = 30;        // Min random turn angle (degrees) — GUI: MA:
+unsigned long max_turn_angle = 90;        // Max random turn angle (degrees) — GUI: XA:
+float turn_tolerance_deg = 5.0;           // Tolerance for turn complete (degrees) — GUI: TT:
+float heading_kp = 1.5;                   // Closed-loop forward P-gain — GUI: KP:
+unsigned long turn_timeout_ms = 8000;     // Abort turn-to-heading timeout (ms) — GUI: TM: (in seconds)
+float targetHeading = 0;                  // Current commanded heading (0–360°)
+float currentHeading = 0;                 // Latest magnetometer reading (0–360°)
 
 // -------------------- Sampling Platform Parameters (relayed to Arduino) --------------------
 float    sample_depth_m  = 2.0;    // Sample depth (metres, 0–2)
@@ -79,7 +86,7 @@ int stuckStep = 0;
 // -------------------- Status Variables --------------------
 int lastLeft = 0;
 int lastRight = 0;
-float lastHeading = 0;
+// (lastHeading replaced by currentHeading in heading-nav section)
 
 // -------------------- Forward Declarations --------------------
 void stopCar();
@@ -88,6 +95,9 @@ void moveForwardAutonomous();
 void moveBackward();
 void turnLeft();
 void turnRight();
+void readHeading();
+float headingError(float target, float current);
+void computeStuckTurnTarget(int switchHit);
 
 // -------------------- HTML Content --------------------
 const char* html = R"rawliteral(
@@ -373,6 +383,7 @@ canvas{border-radius:50%;border:2px solid var(--border2);background:var(--surfac
         <div class="stat-grid">
           <div class="stat-cell"><div class="stat-lbl">Mode</div><div class="stat-val" id="manual-mode">--</div></div>
           <div class="stat-cell"><div class="stat-lbl">Heading</div><div class="stat-val amber" id="manual-angle">0&deg;</div></div>
+          <div class="stat-cell"><div class="stat-lbl">Target</div><div class="stat-val amber" id="manual-target">--</div></div>
           <div class="stat-cell"><div class="stat-lbl">Left Motor</div><div class="stat-val" id="manual-left">0</div></div>
           <div class="stat-cell"><div class="stat-lbl">Right Motor</div><div class="stat-val" id="manual-right">0</div></div>
           <div class="stat-cell"><div class="stat-lbl">ESP32 State</div><div class="stat-val" id="manual-state">N/A</div></div>
@@ -487,6 +498,7 @@ canvas{border-radius:50%;border:2px solid var(--border2);background:var(--surfac
         <div class="stat-grid">
           <div class="stat-cell"><div class="stat-lbl">Mode</div><div class="stat-val" id="auto-mode">--</div></div>
           <div class="stat-cell"><div class="stat-lbl">Heading</div><div class="stat-val amber" id="auto-angle">0&deg;</div></div>
+          <div class="stat-cell"><div class="stat-lbl">Target</div><div class="stat-val amber" id="auto-target">--</div></div>
           <div class="stat-cell"><div class="stat-lbl">Left Motor</div><div class="stat-val" id="auto-left">0</div></div>
           <div class="stat-cell"><div class="stat-lbl">Right Motor</div><div class="stat-val" id="auto-right">0</div></div>
           <div class="stat-cell"><div class="stat-lbl">ESP32 State</div><div class="stat-val" id="auto-state">N/A</div></div>
@@ -519,9 +531,14 @@ canvas{border-radius:50%;border:2px solid var(--border2);background:var(--surfac
     <div>
       <div class="sec-label">Navigation Timing</div>
       <div class="param-row"><span class="pname">Debounce (ms)</span><button class="padj" onclick="updateParam('debounce',-1)">-</button><input class="pinp" type="number" id="debounce" min="0" max="50" value="30"><button class="padj" onclick="updateParam('debounce',1)">+</button><button class="pset" onclick="setParam('E',document.getElementById('debounce').value)">Set</button></div>
-      <div class="param-row"><span class="pname">Min Turn (ms)</span><button class="padj" onclick="updateParam('minTurn',-100)">-</button><input class="pinp" type="number" id="minTurn" min="0" max="10000" value="3000"><button class="padj" onclick="updateParam('minTurn',100)">+</button><button class="pset" onclick="setParam('N',document.getElementById('minTurn').value)">Set</button></div>
-      <div class="param-row"><span class="pname">Max Turn (ms)</span><button class="padj" onclick="updateParam('maxTurn',-100)">-</button><input class="pinp" type="number" id="maxTurn" min="0" max="10000" value="6000"><button class="padj" onclick="updateParam('maxTurn',100)">+</button><button class="pset" onclick="setParam('W',document.getElementById('maxTurn').value)">Set</button></div>
+      <div class="param-row"><span class="pname">Min Turn Angle (&deg;)</span><button class="padj" onclick="updateParam('minTurnAngle',-5)">-</button><input class="pinp" type="number" id="minTurnAngle" min="5" max="180" value="30"><button class="padj" onclick="updateParam('minTurnAngle',5)">+</button><button class="pset" onclick="setParam('MA',document.getElementById('minTurnAngle').value)">Set</button></div>
+      <div class="param-row"><span class="pname">Max Turn Angle (&deg;)</span><button class="padj" onclick="updateParam('maxTurnAngle',-5)">-</button><input class="pinp" type="number" id="maxTurnAngle" min="5" max="180" value="90"><button class="padj" onclick="updateParam('maxTurnAngle',5)">+</button><button class="pset" onclick="setParam('XA',document.getElementById('maxTurnAngle').value)">Set</button></div>
       <div class="param-row"><span class="pname">Fwd Lock (ms)</span><button class="padj" onclick="updateParam('forwardLock',-100)">-</button><input class="pinp" type="number" id="forwardLock" min="0" max="10000" value="2000"><button class="padj" onclick="updateParam('forwardLock',100)">+</button><button class="pset" onclick="setParam('F',document.getElementById('forwardLock').value)">Set</button></div>
+
+      <div class="sec-label">Heading Control</div>
+      <div class="param-row"><span class="pname">Tolerance (&deg;)</span><button class="padj" onclick="updateParam('headingTol',-1)">-</button><input class="pinp" type="number" id="headingTol" min="1" max="30" value="5"><button class="padj" onclick="updateParam('headingTol',1)">+</button><button class="pset" onclick="setParam('TT',document.getElementById('headingTol').value)">Set</button></div>
+      <div class="param-row"><span class="pname">Kp Gain</span><button class="padj" onclick="updateParam('headingKp',-0.1)">-</button><input class="pinp" type="number" id="headingKp" min="0.1" max="10" step="0.1" value="1.5"><button class="padj" onclick="updateParam('headingKp',0.1)">+</button><button class="pset" onclick="setParam('KP',document.getElementById('headingKp').value)">Set</button></div>
+      <div class="param-row"><span class="pname">Turn Timeout (s)</span><button class="padj" onclick="updateParam('turnTimeout',-1)">-</button><input class="pinp" type="number" id="turnTimeout" min="1" max="30" value="8"><button class="padj" onclick="updateParam('turnTimeout',1)">+</button><button class="pset" onclick="setParam('TM',document.getElementById('turnTimeout').value)">Set</button></div>
 
       <div class="sec-label">Sampling</div>
       <div class="param-row">
@@ -680,12 +697,13 @@ function handleArduinoStateTransition(newState) {
 }
 
 function parseResponse(text) {
-  const d = {mode:'--',left:0,right:0,angle:0,stuck:false,state:'N/A',switch_hit:'--',arduino_state:'Ready',sample_count:0};
+  const d = {mode:'--',left:0,right:0,angle:0,target:0,stuck:false,state:'N/A',switch_hit:'--',arduino_state:'Ready',sample_count:0};
   text.split('\n').forEach(l => {
     if (l.includes('MODE:'))         d.mode          = l.split('MODE:')[1].trim();
     if (l.includes('LEFT:'))         d.left          = parseInt(l.split('LEFT:')[1].trim()) || 0;
     if (l.includes('RIGHT:'))        d.right         = parseInt(l.split('RIGHT:')[1].trim()) || 0;
     if (l.includes('ANGLE:'))        d.angle         = parseInt(l.split('ANGLE:')[1].trim()) || 0;
+    if (l.includes('TARGET:'))       d.target        = parseInt(l.split('TARGET:')[1].trim()) || 0;
     if (l.includes('STUCK:'))        d.stuck         = l.split('STUCK:')[1].trim().toLowerCase() === 'true';
     if (l.includes('STATE:'))        d.state         = l.split('STATE:')[1].trim();
     if (l.includes('SWITCH_HIT:'))   d.switch_hit    = l.split('SWITCH_HIT:')[1].trim();
@@ -703,6 +721,7 @@ function refresh() {
     document.getElementById(p + '-left').innerText          = d.left;
     document.getElementById(p + '-right').innerText         = d.right;
     document.getElementById(p + '-angle').innerText         = d.angle + '\u00b0';
+    document.getElementById(p + '-target').innerText        = d.target + '\u00b0';
     const se = document.getElementById(p + '-stuck');
     se.innerText   = d.stuck ? 'YES' : 'NO';
     se.className   = 'stat-val' + (d.stuck ? ' red' : '');
@@ -768,8 +787,9 @@ function loadParams() {
   const m = {
     motorPower:'S', reversePower:'R', turnPower:'P', motorOffset:'X',
     stuckStop1:'K', stuckReverse:'D', stuckStop2:'B', stuckFinal:'O',
-    debounce:'E', minTurn:'N', maxTurn:'W', forwardLock:'F', sampleIntervalParams:'Y',
-    flushTime:'FT', fillTime:'BT'
+    debounce:'E', minTurnAngle:'MA', maxTurnAngle:'XA', forwardLock:'F', sampleIntervalParams:'Y',
+    flushTime:'FT', fillTime:'BT',
+    headingTol:'TT', headingKp:'KP', turnTimeout:'TM'
   };
   Object.entries(m).forEach(([id, k]) => {
     const s = localStorage.getItem(k);
@@ -881,9 +901,7 @@ unsigned long forwardLockStart = 0;
 // -------------------- Debounce --------------------
 unsigned long lastDebounceTime = 0;
 
-// -------------------- Turn Vars --------------------
-unsigned long currentTurnDuration = 0;
-char turnDirection = ' '; // 'L' left, 'R' right
+// -------------------- Turn Vars (replaced by heading-nav, see top of file) --------------------
 
 // -------------------- Sampling Vars --------------------
 unsigned long sampleStart = 0;
@@ -1014,20 +1032,25 @@ void handleStuckNonBlocking() {
         stuckStart = now;
         stuckStep = 3;
     } else if (stuckStep == 3 && now - stuckStart >= STUCK_STOP_TIME_2) {
-        currentTurnDuration = random(min_turn_ms, max_turn_ms + 1);
-        Serial.print("Stuck turning ");
-        Serial.print(turnDirection == 'L' ? "left" : "right");
-        Serial.print(" for ");
-        Serial.print(currentTurnDuration);
-        Serial.println("ms");
-        if (turnDirection == 'L') turnLeft();
-        else turnRight();
+        Serial.println("Stuck turning to heading " + String(targetHeading, 1) + "°");
         stuckStart = now;
         stuckStep = 4;
-    } else if (stuckStep == 4 && now - stuckStart >= currentTurnDuration) {
-        stopCar();
-        stuckStart = now;
-        stuckStep = 5;
+    } else if (stuckStep == 4) {
+        // Heading-controlled turn (closed-loop on magnetometer)
+        readHeading();
+        float err = headingError(targetHeading, currentHeading);
+        bool reached  = fabs(err) < turn_tolerance_deg;
+        bool timedOut = (now - stuckStart) >= turn_timeout_ms;
+        if (reached || timedOut) {
+            stopCar();
+            stuckStart = now;
+            stuckStep = 5;
+            Serial.println(reached ? "Heading reached" : "Turn TIMEOUT");
+            Serial.println("  err=" + String(err, 1) + "° actual=" + String(currentHeading, 1) + "°");
+        } else {
+            if (err > 0) turnRight();
+            else         turnLeft();
+        }
     } else if (stuckStep == 5 && now - stuckStart >= STUCK_FINAL_STOP_TIME) {
         stuckDetected = false;
         stuckStep = 0;  // Done, back to forward drive
@@ -1060,11 +1083,20 @@ void stopCar() {
 
 void moveForwardAutonomous() {
     if (!escArmed) return;
+    // Closed-loop P-controller: hold targetHeading by biasing motor differential.
+    readHeading();
+    float err        = headingError(targetHeading, currentHeading);
+    float correction = heading_kp * err;  // err > 0 → need to turn right
+    int leftPwr  = constrain((int)(Motor_Power + correction), 0, 255);
+    int rightPwr = constrain((int)(Motor_Power - correction), 0, 255);
     escAReverse.writeMicroseconds(1200);
     escBReverse.writeMicroseconds(1200);
-    setMotorPower(Motor_Power, Motor_Power);
+    setMotorPower(leftPwr, rightPwr);
     if (millis() - lastFwdPrint >= 2000) {
-        Serial.println("        move Forward Autonomous");
+        Serial.println("AutoFwd target=" + String(targetHeading, 1) +
+                       "° actual=" + String(currentHeading, 1) +
+                       "° err=" + String(err, 1) +
+                       "° L=" + String(leftPwr) + " R=" + String(rightPwr));
         lastFwdPrint = millis();
     }
 }
@@ -1139,7 +1171,10 @@ void handleCommand(char cmd) {
             sampleStart = millis();
             forwardLockStart = millis(); // Initialize so forward lock is active immediately
             sampling = false;
-            Serial.println("Autonomous mode started");
+            // Capture current compass reading as locked target heading
+            readHeading();
+            targetHeading = currentHeading;
+            Serial.println("Autonomous mode started — locked target heading = " + String(targetHeading, 1) + "°");
         }
     } else if (manualMode) {
         if (cmd == 'F') moveForward();
@@ -1198,7 +1233,7 @@ String getState() {
         if (stuckStep == 1) return "STOP1";
         if (stuckStep == 2) return "REVERSE";
         if (stuckStep == 3) return "STOP2";
-        if (stuckStep == 4) return String("TURN ") + (turnDirection == 'L' ? "LEFT" : "RIGHT") + " " + String(currentTurnDuration) + "ms";
+        if (stuckStep == 4) return "TURN→" + String((int)targetHeading) + "°";
         if (stuckStep == 5) return "FINAL STOP";
     }
     if (millis() - forwardLockStart < forward_lock_ms) return "FORWARD LOCK " + String(forward_lock_ms) + "ms";
@@ -1216,10 +1251,40 @@ int checkSwitches() {
     return 0;
 }
 
-void setTurnDirection(int switchHit) {
-    if (switchHit == 1) turnDirection = 'R';      // Left hit -> turn right
-    else if (switchHit == 5) turnDirection = 'L'; // Right hit -> turn left
-    else turnDirection = random(0, 2) ? 'L' : 'R'; // Front -> random
+// -------------------- Magnetometer Heading Helpers --------------------
+void readHeading() {
+    sensors_event_t event;
+    mag.getEvent(&event);
+    float h = atan2(event.magnetic.y, event.magnetic.x) * 180 / PI;
+    h += 4.0;  // Magnetic declination East
+    if (h < 0)   h += 360;
+    if (h >= 360) h -= 360;
+    currentHeading = h;
+}
+
+float headingError(float target, float current) {
+    float diff = target - current;
+    while (diff > 180)  diff -= 360;
+    while (diff < -180) diff += 360;
+    return diff;  // -180..+180; positive = need to turn right (CW)
+}
+
+// Computes new target heading for stuck recovery turn.
+// Right obstacle (5)  → subtract angle (turn LEFT, CCW)
+// Left  obstacle (1)  → add angle      (turn RIGHT, CW)
+// Front obstacle (3)  → add angle      (always turn RIGHT)
+void computeStuckTurnTarget(int switchHit) {
+    long randomAngle = random((long)min_turn_angle, (long)max_turn_angle + 1);
+    float prevTarget = targetHeading;
+    if (switchHit == 5) {
+        targetHeading = targetHeading - (float)randomAngle;
+    } else {  // switchHit == 1 or 3
+        targetHeading = targetHeading + (float)randomAngle;
+    }
+    while (targetHeading >= 360) targetHeading -= 360;
+    while (targetHeading < 0)    targetHeading += 360;
+    Serial.println("Stuck switch=" + String(switchHit) + " angle=" + String(randomAngle)
+                   + "° prev=" + String(prevTarget, 1) + "° new=" + String(targetHeading, 1) + "°");
 }
 
 void updateLED() {
@@ -1236,18 +1301,14 @@ void updateLED() {
 }
 
 void handleStatus() {
-    sensors_event_t event;
-    mag.getEvent(&event);
-    lastHeading = atan2(event.magnetic.y, event.magnetic.x) * 180 / PI;
-    lastHeading += 4.0; // Apply 4 degrees East declination
-    if (lastHeading < 0)   lastHeading += 360;
-    if (lastHeading >= 360) lastHeading -= 360;
+    readHeading();
 
     String status = "";
     status += "MODE:"         + getCurrentMode()                      + "\n";
     status += "LEFT:"         + String(lastLeft)                      + "\n";
     status += "RIGHT:"        + String(lastRight)                     + "\n";
-    status += "ANGLE:"        + String((int)lastHeading)              + "\n";
+    status += "ANGLE:"        + String((int)currentHeading)           + "\n";
+    status += "TARGET:"       + String((int)targetHeading)            + "\n";
     status += "STUCK:"        + String(stuckDetected ? "True":"False")+ "\n";
     status += "STATE:"        + getState()                            + "\n";
     status += "SWITCH_HIT:"   + String(checkSwitches())               + "\n";
@@ -1286,12 +1347,21 @@ void handleCommandPath() {
         } else if (msg.startsWith("E:")) {
             debounce_ms = constrain(msg.substring(2).toInt(), 0, 50);
             Serial.println("Debounce: " + String(debounce_ms));
-        } else if (msg.startsWith("N:")) {
-            min_turn_ms = msg.substring(2).toInt();
-            Serial.println("Min Turn: " + String(min_turn_ms));
-        } else if (msg.startsWith("W:")) {
-            max_turn_ms = msg.substring(2).toInt();
-            Serial.println("Max Turn: " + String(max_turn_ms));
+        } else if (msg.startsWith("MA:")) {
+            min_turn_angle = (unsigned long)constrain(msg.substring(3).toInt(), 5, 180);
+            Serial.println("Min Turn Angle: " + String(min_turn_angle) + "°");
+        } else if (msg.startsWith("XA:")) {
+            max_turn_angle = (unsigned long)constrain(msg.substring(3).toInt(), 5, 180);
+            Serial.println("Max Turn Angle: " + String(max_turn_angle) + "°");
+        } else if (msg.startsWith("TT:")) {
+            turn_tolerance_deg = constrain(msg.substring(3).toFloat(), 1.0, 30.0);
+            Serial.println("Turn Tolerance: " + String(turn_tolerance_deg, 1) + "°");
+        } else if (msg.startsWith("KP:")) {
+            heading_kp = constrain(msg.substring(3).toFloat(), 0.1, 10.0);
+            Serial.println("Heading Kp: " + String(heading_kp, 2));
+        } else if (msg.startsWith("TM:")) {
+            turn_timeout_ms = (unsigned long)constrain(msg.substring(3).toInt(), 1, 30) * 1000;
+            Serial.println("Turn Timeout: " + String(turn_timeout_ms / 1000) + "s");
         } else if (msg.startsWith("F:")) {
             forward_lock_ms = msg.substring(2).toInt();
             Serial.println("Forward Lock: " + String(forward_lock_ms));
@@ -1452,7 +1522,7 @@ void loop() {
             int switchHit = checkSwitches();
             if (switchHit > 0 && millis() - forwardLockStart >= forward_lock_ms) {
                 stuckDetected = true;
-                setTurnDirection(switchHit);
+                computeStuckTurnTarget(switchHit);
                 lastDebounceTime = millis();
             } else if (millis() - sampleStart >= sample_interval_ms) {
                 sampling = true;
