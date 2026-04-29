@@ -49,6 +49,8 @@ unsigned long fill_time_ms  = 30000;  // Bottle-fill pump duration (ms, default 
 bool isWaterSamplerOnBoard = true;     // true = use Arduino Uno, false = simulate sampling
 unsigned long skipSampleDelay = 10000; // Simulated sample hold time (ms, default 10s)
 unsigned long skipSampleStart = 0;     // Internal: timestamp for non-blocking skip
+unsigned long reverse_after_sample_duration = 7; // Reverse-motor duration at sample start in SECONDS (GUI: RSD:)
+bool sampleReverseHandled = false;     // Internal: tracks reverse phase for non-blocking skip path
 
 // -------------------- PWM Channels --------------------
 const int pwmPinA = 4;         // Servo pin for left motor
@@ -543,6 +545,13 @@ canvas{border-radius:50%;border:2px solid var(--border2);background:var(--surfac
         <button class="padj" onclick="updateParam('skipDelay',1)">+</button>
         <button class="pset" onclick="setParam('SST',document.getElementById('skipDelay').value)">Set</button>
       </div>
+      <div class="param-row">
+        <span class="pname">Reverse Duration (s)</span>
+        <button class="padj" onclick="updateParam('rsdDelay',-1)">-</button>
+        <input class="pinp" type="number" id="rsdDelay" min="0" max="30" value="7">
+        <button class="padj" onclick="updateParam('rsdDelay',1)">+</button>
+        <button class="pset" onclick="setParam('RSD',document.getElementById('rsdDelay').value)">Set</button>
+      </div>
     </div>
   </div>
 </div>
@@ -777,6 +786,9 @@ function loadParams() {
   const storedSST = localStorage.getItem('SST');
   if (storedSST && document.getElementById('skipDelay'))
     document.getElementById('skipDelay').value = storedSST;
+  const storedRSD = localStorage.getItem('RSD');
+  if (storedRSD && document.getElementById('rsdDelay'))
+    document.getElementById('rsdDelay').value = storedRSD;
 }
 
 const canvas = document.getElementById('joystick');
@@ -906,6 +918,11 @@ void performAutoSample() {
                                               // flush(30s) + depth(~67s) + pumps(30s)
                                               // + turns(~10s) + 63s safety margin
 
+    // Reverse motors briefly to kill forward momentum
+    Serial.println("Reversing motors for " + String(reverse_after_sample_duration) + "s at sample start");
+    moveBackward();
+    bool reverseHandled = false;
+
     Serial.println("Waiting for Arduino response (:X1)...");
 
     // Loop until Timeout OR Stop button is pressed
@@ -913,6 +930,14 @@ void performAutoSample() {
 
         // CRITICAL: Keep GUI alive and responsive
         server.handleClient();
+
+        // End reverse phase after configured duration
+        if (!reverseHandled &&
+            (millis() - waitStart) >= (reverse_after_sample_duration * 1000UL)) {
+            stopCar();
+            reverseHandled = true;
+            Serial.println("Reverse phase complete");
+        }
 
         if (Serial2.available()) {
             char c = Serial2.read();
@@ -1085,6 +1110,7 @@ void handleCommand(char cmd) {
         autonomousMode = false;
         sampling = false;
         skipSampleStart = 0;
+        sampleReverseHandled = false;
         Serial2.print(":C1\n");  // Task 2
         return;
     }
@@ -1296,6 +1322,9 @@ void handleCommandPath() {
         } else if (msg.startsWith("SST:")) {
             skipSampleDelay = (unsigned long)constrain(msg.substring(4).toInt(), 1, 120) * 1000;
             Serial.println("Skip Sample Delay: " + String(skipSampleDelay / 1000) + "s");
+        } else if (msg.startsWith("RSD:")) {
+            reverse_after_sample_duration = (unsigned long)constrain(msg.substring(4).toInt(), 0, 30);
+            Serial.println("Reverse after sample: " + String(reverse_after_sample_duration) + "s");
         }
     }
     server.send(200, "text/plain", "OK");
@@ -1385,26 +1414,39 @@ void loop() {
                         Serial.println("Max samples reached, exiting autonomous mode");
                         autonomousMode = false; stopMode = true; sampling = false;
                     } else {
+                        moveBackward();                           // Start reverse phase
+                        sampleReverseHandled = false;
                         skipSampleStart = millis();
-                        arduinoState = "Auto Sampling...";    // GUI countdown pauses on this state
-                        Serial.println("No sampler - simulating sample "
-                            + String(sample_count + 1) + "/" + String(sample_max)
-                            + ", delay " + String(skipSampleDelay / 1000) + "s");
+                        arduinoState = "Auto Sampling...";        // GUI countdown pauses on this state
+                        Serial.println("No sampler - reversing " + String(reverse_after_sample_duration)
+                            + "s then simulating sample "
+                            + String(sample_count + 1) + "/" + String(sample_max));
                     }
-                } else if (millis() - skipSampleStart >= skipSampleDelay) {
-                    sample_count++;
-                    sampleStart     = millis();
-                    sampling        = false;
-                    skipSampleStart = 0;
-                    arduinoState    = "Sample Done";          // GUI countdown resets on this state
-                    Serial.println("Simulated sample done: "
-                        + String(sample_count) + "/" + String(sample_max));
-                    if (sample_count >= sample_max) {
-                        Serial.println("All simulated samples complete, stopping");
-                        autonomousMode = false; stopMode = true; stopCar();
+                } else {
+                    // End reverse phase after configured duration
+                    if (!sampleReverseHandled &&
+                        (millis() - skipSampleStart) >= (reverse_after_sample_duration * 1000UL)) {
+                        stopCar();
+                        sampleReverseHandled = true;
+                        Serial.println("Reverse phase complete (skip mode)");
                     }
-                }
-            }
+                    // Self-ack when total delay elapsed
+                    if ((millis() - skipSampleStart) >= skipSampleDelay) {
+                        sample_count++;
+                        sampleStart          = millis();
+                        sampling             = false;
+                        skipSampleStart      = 0;
+                        sampleReverseHandled = false;
+                        arduinoState         = "Sample Done";  // GUI countdown resets on this state
+                        Serial.println("Simulated sample done: "
+                            + String(sample_count) + "/" + String(sample_max));
+                        if (sample_count >= sample_max) {
+                            Serial.println("All simulated samples complete, stopping");
+                            autonomousMode = false; stopMode = true; stopCar();
+                        }
+                    }
+                }   // end else (timing checks)
+            }   // end else (!isWaterSamplerOnBoard)
         } else {
             moveForwardAutonomous();
             int switchHit = checkSwitches();
