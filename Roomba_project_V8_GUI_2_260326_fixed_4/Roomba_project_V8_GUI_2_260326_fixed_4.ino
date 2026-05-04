@@ -1250,15 +1250,17 @@ String getCurrentMode() {
 }
 
 String getState() {
-    if (sampling) return "WATER SAMPLE";
-    if (aligningAfterSample) return "ALIGN→" + String((int)targetHeading) + "°";
+    // Mirrors loop() priority: stuck > sampling > align > forward
     if (stuckDetected) {
         if (stuckStep == 1) return "STOP1";
         if (stuckStep == 2) return "REVERSE";
         if (stuckStep == 3) return "STOP2";
         if (stuckStep == 4) return "TURN→" + String((int)targetHeading) + "°";
         if (stuckStep == 5) return "FINAL STOP";
+        return "STUCK";  // step 0 — transient, before first handleStuckNonBlocking() iteration
     }
+    if (sampling) return "WATER SAMPLE";
+    if (aligningAfterSample) return "ALIGN→" + String((int)targetHeading) + "°";
     if (millis() - forwardLockStart < forward_lock_ms) return "FORWARD LOCK " + String(forward_lock_ms) + "ms";
     return "FORWARD";
 }
