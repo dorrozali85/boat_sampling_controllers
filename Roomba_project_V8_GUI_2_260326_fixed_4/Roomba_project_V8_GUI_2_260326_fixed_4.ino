@@ -47,6 +47,13 @@ unsigned long turn_timeout_ms = 8000;     // Abort turn-to-heading timeout (ms) 
 float targetHeading = 0;                  // Current commanded heading (0–360°)
 float currentHeading = 0;                 // Latest magnetometer reading (0–360°)
 
+// -------------------- Stuck-Recovery Sample-Timer Pause --------------------
+unsigned long stuckPauseStart = 0;        // millis() at stuck recovery entry; on exit shifts sampleStart by elapsed
+
+// -------------------- Post-Sample Heading Alignment --------------------
+bool aligningAfterSample = false;         // true = boat is realigning to targetHeading after a sample completes
+unsigned long alignStart = 0;             // millis() at align start; for turn_timeout_ms abort
+
 // -------------------- Sampling Platform Parameters (relayed to Arduino) --------------------
 float    sample_depth_m  = 2.0;    // Sample depth (metres, 0–2)
 unsigned long flush_time_ms = 30000;  // Flush pump duration (ms, default 30s)
@@ -468,7 +475,8 @@ canvas{border-radius:50%;border:2px solid var(--border2);background:var(--surfac
 
       <div class="auto-btns">
         <button class="abtn-auto" onclick="startAuto()">&#9654;&ensp;Start Auto Mode</button>
-        <button class="abtn-stuck" onclick="sendCommand('C')">&#9888;&ensp;Trigger Stuck</button>
+        <button class="abtn-stuck" onclick="sendCommand('CL')">&#11013;&ensp;Stuck Left</button>
+        <button class="abtn-stuck" onclick="sendCommand('CR')">Stuck Right&ensp;&#10145;</button>
       </div>
 
     </div>
@@ -1000,6 +1008,8 @@ void performAutoSample() {
         sample_count++;
         sampleStart = millis();
         sampling = false;
+        aligningAfterSample = true;     // Realign to targetHeading before resuming forward
+        alignStart = millis();
     } else {
         if (stopMode) {
              Serial.println("Sampling Aborted by User (STOP).");
@@ -1020,6 +1030,7 @@ void handleStuckNonBlocking() {
         Serial.println("Stuck stopping");
         stopCar();
         stuckStart = now;
+        stuckPauseStart = now;          // Pause sample-interval clock for full stuck duration
         stuckStep = 1;
     } else if (stuckStep == 1 && now - stuckStart >= STUCK_STOP_TIME_1) {
         Serial.println("Stuck reversing");
@@ -1055,6 +1066,13 @@ void handleStuckNonBlocking() {
         stuckDetected = false;
         stuckStep = 0;  // Done, back to forward drive
         forwardLockStart = millis();
+        if (stuckPauseStart > 0) {
+            // Resume sample timer: shift sampleStart forward by the duration we were stuck.
+            unsigned long pausedFor = now - stuckPauseStart;
+            sampleStart += pausedFor;
+            Serial.println("Sample timer paused during stuck for " + String(pausedFor / 1000) + "s");
+            stuckPauseStart = 0;
+        }
         Serial.println("Stuck ended");
     }
 }
@@ -1143,6 +1161,9 @@ void handleCommand(char cmd) {
         sampling = false;
         skipSampleStart = 0;
         sampleReverseHandled = false;
+        aligningAfterSample = false;
+        alignStart = 0;
+        stuckPauseStart = 0;
         Serial2.print(":C1\n");  // Task 2
         return;
     }
@@ -1197,7 +1218,8 @@ void handleCommand(char cmd) {
         else if (cmd == '4') Serial2.print(":P4\n");
         else if (cmd == '5') Serial2.print(":P5\n");
     } else if (autonomousMode) {
-        if (cmd == 'C') stuckDetected = true;
+        // Manual stuck triggers are now CL / CR (handled in handleCommandPath()).
+        // The bare 'C' command has been removed in favour of explicit left/right triggers.
     }
 }
 
@@ -1229,6 +1251,7 @@ String getCurrentMode() {
 
 String getState() {
     if (sampling) return "WATER SAMPLE";
+    if (aligningAfterSample) return "ALIGN→" + String((int)targetHeading) + "°";
     if (stuckDetected) {
         if (stuckStep == 1) return "STOP1";
         if (stuckStep == 2) return "REVERSE";
@@ -1395,6 +1418,20 @@ void handleCommandPath() {
         } else if (msg.startsWith("RSD:")) {
             reverse_after_sample_duration = (unsigned long)constrain(msg.substring(4).toInt(), 0, 30);
             Serial.println("Reverse after sample: " + String(reverse_after_sample_duration) + "s");
+        } else if (msg == "CL") {
+            // Manual stuck trigger — boat turns LEFT
+            if (autonomousMode) {
+                stuckDetected = true;
+                computeStuckTurnTarget(5);  // 5 = right-switch semantics → boat turns LEFT (CCW)
+                Serial.println("Manual stuck trigger: LEFT");
+            }
+        } else if (msg == "CR") {
+            // Manual stuck trigger — boat turns RIGHT
+            if (autonomousMode) {
+                stuckDetected = true;
+                computeStuckTurnTarget(1);  // 1 = left-switch semantics → boat turns RIGHT (CW)
+                Serial.println("Manual stuck trigger: RIGHT");
+            }
         }
     }
     server.send(200, "text/plain", "OK");
@@ -1474,9 +1511,12 @@ void loop() {
             Serial.println("Stuck detected");
             handleStuckNonBlocking();
         } else if (sampling) {
-            stopCar();
+            // NOTE: do NOT stopCar() here. Both branches below begin with moveBackward()
+            // for `reverse_after_sample_duration` seconds (kills forward momentum BEFORE
+            // the sample wait). A pre-stop here was overriding the no-sampler reverse on
+            // every loop iteration and clobbering the real-Uno reverse on first entry.
             if (isWaterSamplerOnBoard) {
-                performAutoSample();                          // unchanged path
+                performAutoSample();                          // calls moveBackward() internally
             } else {
                 // Non-blocking simulated sample
                 if (skipSampleStart == 0) {
@@ -1505,6 +1545,8 @@ void loop() {
                         sample_count++;
                         sampleStart          = millis();
                         sampling             = false;
+                        aligningAfterSample  = true;             // Realign to targetHeading before forward
+                        alignStart           = millis();
                         skipSampleStart      = 0;
                         sampleReverseHandled = false;
                         arduinoState         = "Sample Done";  // GUI countdown resets on this state
@@ -1517,6 +1559,24 @@ void loop() {
                     }
                 }   // end else (timing checks)
             }   // end else (!isWaterSamplerOnBoard)
+        } else if (aligningAfterSample) {
+            // Post-sample alignment: turn under closed-loop heading control until error
+            // is within tolerance, then resume forward. Boat may have rotated during the
+            // sample wait — this re-acquires the locked targetHeading before forward.
+            readHeading();
+            float err     = headingError(targetHeading, currentHeading);
+            bool reached  = fabs(err) < turn_tolerance_deg;
+            bool timedOut = (millis() - alignStart) >= turn_timeout_ms;
+            if (reached || timedOut) {
+                stopCar();
+                aligningAfterSample = false;
+                forwardLockStart    = millis();   // grace period before microswitches re-engage
+                Serial.println(reached ? "Post-sample aligned" : "Post-sample align TIMEOUT");
+                Serial.println("  err=" + String(err, 1) + "° actual=" + String(currentHeading, 1) + "°");
+            } else {
+                if (err > 0) turnRight();
+                else         turnLeft();
+            }
         } else {
             moveForwardAutonomous();
             int switchHit = checkSwitches();
