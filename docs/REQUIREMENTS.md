@@ -117,10 +117,10 @@ The Arduino shall execute the following sequence for each sample cycle:
 
 - FR-39: Every entry to autonomous mode shall create a new CSV log file on internal flash (LittleFS), named `log_NNN.csv` with a monotonically-increasing persistent sequence number that survives power cycles (counter file `/log_counter.txt`).
 - FR-40: The logger shall sample the boat state at exactly 2 Hz (500 ms period), be fully non-blocking, and shall not introduce any `delay()` calls in the main loop.
-- FR-41: The CSV schema shall be (exact column order): `Timestamp_ms, Runtime_sec, Mode, NavState, Stuck, SampleCount, ArduinoState, TargetHeading, ActualHeading, HeadingError, LeftPower, RightPower, SampleIntervalRemaining_ms`.
-- FR-42: Log files shall be retrievable from the GUI over the ESP32 WiFi AP via `GET /logs` (HTML index) and `GET /log_NNN.csv` (CSV download stream).
-- FR-43: The log file handle shall remain open for the entire duration of a single autonomous mission. Rows shall be batched in a small RAM buffer (~512 B) and flushed to flash at the buffer size threshold and on mission exit, guaranteeing data persistence with at most ~3 s of loss on unexpected power-cut.
-- FR-44: LittleFS shall be auto-formatted on mount failure (`LittleFS.begin(true)`), so the logger requires no manual provisioning on a fresh device.
+- FR-41: The CSV schema shall be 14 columns (exact order): `Timestamp_ms, Runtime_sec, Mode, NavState, Stuck, SwitchHit, SampleCount, ArduinoState, TargetHeading, ActualHeading, HeadingError, LeftPower, RightPower, SampleIntervalRemaining_ms`. The `SwitchHit` field reflects the live live debounced switch state (0=none, 1=left, 3=front, 5=right). The `SampleIntervalRemaining_ms` field shall reflect the logical (pause-aware) countdown — during stuck recovery it shall be calculated as if the timer were paused, matching FR-20 semantics.
+- FR-42: Log files shall be retrievable from the GUI over the ESP32 WiFi AP via `GET /logs` (HTML index) and `GET /log_NNN.csv` (CSV download stream). Both endpoints shall return HTTP 503 when the file system is not mounted.
+- FR-43: The log file handle shall remain open for the entire duration of a single autonomous mission. Each row shall be flushed to flash on the same loop iteration in which it is generated, guaranteeing worst-case data loss on unexpected power-cut of ≤ 500 ms (one sample period).
+- FR-44: LittleFS shall **NOT** be auto-formatted on mount failure. On failure, the logger shall silently disable itself (set `loggerFsReady=false`), preserving any existing logs on the FS; autonomous-mode operation shall continue without logging. A virgin device requires a one-shot manual `LittleFS.format()` provisioning step.
 
 ---
 

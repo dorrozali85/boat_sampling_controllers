@@ -360,11 +360,11 @@ The ESP32 records full boat state to internal flash at 2 Hz for the duration of 
 - A new log file is created automatically on every transition into autonomous mode (edge-detected by `updateLogger()`; not coupled to the `T`/`S` handlers).
 - File naming: `/log_001.csv`, `/log_002.csv`, ... zero-padded to 3 digits, grows naturally past 999.
 - Sequence number persists in `/log_counter.txt` (single integer) — never reuses a filename across reboots.
-- The file handle stays open for the entire mission. Rows are batched in a 512-byte RAM buffer (`logBuffer`) and flushed to flash either when the buffer fills (~6 rows = ~3 s of data) or on mission exit (`stopLog()`).
-- Sample rate: 500 ms gate inside `updateLogger()`, fully non-blocking. Worst-case data loss on power cut: ~3 seconds (one flush interval).
-- LittleFS is auto-formatted on first boot via `LittleFS.begin(true)` — no manual provisioning needed.
+- The file handle stays open for the entire mission. Each row is written to flash and `flush()`-ed within the same loop iteration that produces it (`logBuffer` reserves 768 bytes once and is reused without reallocation).
+- Sample rate: 500 ms gate inside `updateLogger()`, fully non-blocking. **Worst-case data loss on power cut: ≤ 500 ms** (only the in-progress row may be lost; all prior rows are committed).
+- LittleFS is **NOT** auto-formatted on mount failure (would risk silently wiping existing logs on a transient FS glitch). If `LittleFS.begin()` fails, the logger silently disables itself (`loggerFsReady=false`), autonomous mode still works, and `/logs` and `/log_*.csv` return HTTP 503. To format a virgin device, flash a one-shot `LittleFS.format()` sketch once.
 
-### CSV schema
+### CSV schema (14 columns)
 
 | Column | Source | Notes |
 |---|---|---|
@@ -373,6 +373,7 @@ The ESP32 records full boat state to internal flash at 2 Hz for the duration of 
 | `Mode` | `getCurrentMode()` | STOP / MANUAL / AUTONOMOUS |
 | `NavState` | `getState()` | FORWARD / FORWARD LOCK / WATER SAMPLE / ALIGN→{°} / STOP1 / REVERSE / STOP2 / TURN→{°} / FINAL STOP / STUCK |
 | `Stuck` | `stuckDetected` | `true` / `false` |
+| `SwitchHit` | `checkSwitches()` | `0` = none, `1` = left, `3` = front, `5` = right (live debounced read) |
 | `SampleCount` | `sample_count` | 0..`sample_max` |
 | `ArduinoState` | `arduinoState` | Quoted CSV field (defensive against future commas in state strings) |
 | `TargetHeading` | `targetHeading` | 1 decimal, degrees |
@@ -380,7 +381,7 @@ The ESP32 records full boat state to internal flash at 2 Hz for the duration of 
 | `HeadingError` | `headingError(target,actual)` | 1 decimal, signed −180..+180 |
 | `LeftPower` | `lastLeft` | Last commanded left motor power (0–255) |
 | `RightPower` | `lastRight` | Last commanded right motor power (0–255) |
-| `SampleIntervalRemaining_ms` | `sample_interval_ms - (now-sampleStart)` | Clamped at 0 |
+| `SampleIntervalRemaining_ms` | `sample_interval_ms - ((now - sampleStart) - stuckSoFar)` | Logically paused during stuck recovery — subtracts the in-progress stuck duration so the field holds steady while stuck. Matches the GUI countdown semantics in FR-20. Clamped at 0. |
 
 ### HTTP endpoints
 

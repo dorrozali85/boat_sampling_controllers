@@ -72,6 +72,7 @@ bool sampleReverseHandled = false;     // Internal: tracks reverse phase for non
 // autonomous mission. Sequence number persists in /log_counter.txt so
 // filenames never collide across reboots.
 File          logFile;                                 // file handle stays open for whole mission
+bool          loggerFsReady = false;                   // true if LittleFS.begin() succeeded at boot
 bool          loggerActive = false;                    // true between autonomous start and stop
 unsigned long autoStartMs  = 0;                        // millis() at autonomous mode entry — drives Runtime_sec
 unsigned long lastLogMs    = 0;                        // last row timestamp — drives 500 ms rate gate
@@ -80,9 +81,9 @@ uint32_t      logSeqNum    = 0;                        // current/last log file 
 const size_t  LOG_FLUSH_BYTES   = 512;                 // ~6 rows
 const char*   LOG_COUNTER_PATH  = "/log_counter.txt";  // single int — persistent log sequence number
 const char*   LOG_CSV_HEADER    =
-    "Timestamp_ms,Runtime_sec,Mode,NavState,Stuck,SampleCount,ArduinoState,"
-    "TargetHeading,ActualHeading,HeadingError,LeftPower,RightPower,"
-    "SampleIntervalRemaining_ms";
+    "Timestamp_ms,Runtime_sec,Mode,NavState,Stuck,SwitchHit,SampleCount,"
+    "ArduinoState,TargetHeading,ActualHeading,HeadingError,LeftPower,"
+    "RightPower,SampleIntervalRemaining_ms";
 
 // -------------------- PWM Channels --------------------
 const int pwmPinA = 4;         // Servo pin for left motor
@@ -1419,6 +1420,7 @@ void startNewLog() {
     logFile.println(LOG_CSV_HEADER);
     logFile.flush();
     logBuffer = "";
+    logBuffer.reserve(LOG_FLUSH_BYTES + 256);  // one-shot allocation; prevents per-row realloc/fragmentation
     Serial.println("LOG: started " + path);
 }
 
@@ -1431,26 +1433,40 @@ void stopLog() {
     }
 }
 
-// Build one CSV row and append to buffer; flush if buffer is full.
+// Build one CSV row and append to buffer; flush immediately.
 // snprintf into a small stack buffer — no heap churn per row.
+// Flushing every row caps worst-case data loss at one sample period (~500ms)
+// and is well within ESP32 flash endurance (decades of continuous logging).
 void writeLogRow() {
     if (!logFile) return;
 
     unsigned long now = millis();
     float runtimeSec  = (float)(now - autoStartMs) / 1000.0f;
     float err         = headingError(targetHeading, currentHeading);
-    long  sampleRem   = (long)sample_interval_ms - (long)(now - sampleStart);
+    int   switchHit   = checkSwitches();     // 0=none / 1=left / 3=front / 5=right (live debounced read)
+
+    // SampleIntervalRemaining is logically paused during stuck recovery.
+    // sampleStart is only shifted in handleStuckNonBlocking step 5 (on exit).
+    // Until then, compensate by subtracting how long we've been stuck so far —
+    // gives the same value the GUI countdown shows after stuck ends.
+    unsigned long stuckSoFar = (stuckDetected && stuckPauseStart > 0)
+                             ? (now - stuckPauseStart)
+                             : 0;
+    long sampleRem = (long)sample_interval_ms
+                   - (long)((now - sampleStart) - stuckSoFar);
     if (sampleRem < 0) sampleRem = 0;
 
-    char row[220];
+    char row[240];
+    // 14 columns: ...Stuck,SwitchHit,SampleCount,...
     // ArduinoState wrapped in "..." in case a future state string contains a comma.
     snprintf(row, sizeof(row),
-        "%lu,%.3f,%s,%s,%s,%d,\"%s\",%.1f,%.1f,%.1f,%d,%d,%ld\n",
+        "%lu,%.3f,%s,%s,%s,%d,%d,\"%s\",%.1f,%.1f,%.1f,%d,%d,%ld\n",
         now,
         runtimeSec,
         getCurrentMode().c_str(),
         getState().c_str(),
         stuckDetected ? "true" : "false",
+        switchHit,
         sample_count,
         arduinoState.c_str(),
         targetHeading,
@@ -1461,12 +1477,14 @@ void writeLogRow() {
         sampleRem);
 
     logBuffer += row;
-    if (logBuffer.length() >= LOG_FLUSH_BYTES) flushLogBuffer();
+    flushLogBuffer();    // commit immediately — worst-case data loss = 500 ms
 }
 
 // Single entry point called from loop(). Edge-detects autonomousMode
 // transitions and gates the 2 Hz sample rate.
 void updateLogger() {
+    if (!loggerFsReady) return;       // FS not mounted — silent no-op
+
     // Edge UP — autonomous just started
     if (autonomousMode && !loggerActive) {
         startNewLog();
@@ -1492,6 +1510,11 @@ void updateLogger() {
 
 // -------- HTTP: GET /logs → simple HTML index page --------
 void handleLogList() {
+    if (!loggerFsReady) {
+        server.send(503, "text/plain",
+                    "LittleFS not mounted — logger disabled. Existing logs preserved.");
+        return;
+    }
     String out =
         "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<title>SRV-01 Logs</title><style>body{font-family:sans-serif;background:#0c1116;color:#e0e0e0;padding:20px}"
@@ -1520,6 +1543,7 @@ void handleCommandPath() {
 
     // -------- Serve log files: /log_NNN.csv --------
     if (msg.startsWith("log_") && msg.endsWith(".csv")) {
+        if (!loggerFsReady) { server.send(503, "text/plain", "FS not mounted"); return; }
         String path = "/" + msg;
         if (!LittleFS.exists(path)) { server.send(404, "text/plain", "Not found"); return; }
         File f = LittleFS.open(path, "r");
@@ -1648,10 +1672,16 @@ void setup() {
     Serial.println("Wi-Fi AP Started. IP: " + WiFi.softAPIP().toString());
     Wire.begin();
 
-    // LittleFS for mission logging — auto-format on mount failure.
-    if (!LittleFS.begin(true)) {
-        Serial.println("LittleFS mount FAILED — logger disabled");
+    // LittleFS for mission logging — do NOT auto-format on mount failure
+    // (would silently wipe existing logs). Logger silently disables itself
+    // instead; autonomous mode still works without logging.
+    if (!LittleFS.begin(false)) {
+        Serial.println("LittleFS mount FAILED — logger DISABLED for this boot."
+                       " Existing logs preserved. To format a virgin device,"
+                       " flash a one-shot LittleFS.format() sketch.");
+        loggerFsReady = false;
     } else {
+        loggerFsReady = true;
         Serial.println("LittleFS mounted. Total=" + String(LittleFS.totalBytes())
                        + " Used=" + String(LittleFS.usedBytes()));
     }

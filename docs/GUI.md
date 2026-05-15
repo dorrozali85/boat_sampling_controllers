@@ -264,7 +264,7 @@ The page lists every `log_NNN.csv` file currently on LittleFS with its size in b
 1. Run a mission (autonomous mode entry → autonomous mode exit). A new `log_NNN.csv` is created automatically and written to throughout the mission. Filename increments persistently across reboots.
 2. After returning to shore, while still connected to the boat's WiFi AP (`ESP32_Robot_HTML`), open `/logs` in the browser.
 3. Tap a filename — the file streams as `text/csv` and the browser saves it to the device's Downloads folder.
-4. Open in Excel / Google Sheets / Python / MATLAB for analysis. 13 columns; see ESP32_MASTER.md → Mission Logging for the schema.
+4. Open in Excel / Google Sheets / Python / MATLAB for analysis. 14 columns; see ESP32_MASTER.md → Mission Logging for the schema.
 
 ### Notes
 
