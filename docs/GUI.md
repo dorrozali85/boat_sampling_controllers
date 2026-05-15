@@ -242,3 +242,32 @@ Sample Interval is synced bidirectionally with the Autonomous tab input.
 ### TARGET Field Parsing
 
 `refresh()` parses the `TARGET:` line from `/status` and updates a `p+'-target'` DOM element in both telemetry cards. This shows the locked compass heading the boat is closed-loop tracking (0–360°).
+
+---
+
+## Mission Logs (LittleFS)
+
+The ESP32 records the full boat state at 2 Hz to internal flash for every autonomous mission. The main control UI is unchanged; logs are accessed via a separate URL.
+
+### Access
+
+Navigate manually from a connected device (phone, tablet, laptop) to:
+
+```
+http://192.168.4.1/logs
+```
+
+The page lists every `log_NNN.csv` file currently on LittleFS with its size in bytes and a direct download link. Used/total bytes of the LittleFS partition are shown at the top.
+
+### Workflow
+
+1. Run a mission (autonomous mode entry → autonomous mode exit). A new `log_NNN.csv` is created automatically and written to throughout the mission. Filename increments persistently across reboots.
+2. After returning to shore, while still connected to the boat's WiFi AP (`ESP32_Robot_HTML`), open `/logs` in the browser.
+3. Tap a filename — the file streams as `text/csv` and the browser saves it to the device's Downloads folder.
+4. Open in Excel / Google Sheets / Python / MATLAB for analysis. 13 columns; see ESP32_MASTER.md → Mission Logging for the schema.
+
+### Notes
+
+- There is **no button on the Manual / Autonomous / Parameters tabs** for the log index — it is a direct URL. This is intentional to keep the operator UI uncluttered.
+- The logger is fully transparent to the main GUI — none of the telemetry polling, parameter sets, or mode controls are affected by it.
+- LittleFS is finite (~1.5 MB on a standard ESP32 module). A typical 5-minute mission at 2 Hz produces ~50 KB. After many missions the operator may want to manually delete old logs (no delete UI provided — flash a new firmware build or use ESP32 file-system tools).

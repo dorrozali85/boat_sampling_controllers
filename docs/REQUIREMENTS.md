@@ -113,6 +113,15 @@ The Arduino shall execute the following sequence for each sample cycle:
 - FR-37: If autonomous mode is stopped and restarted mid-mission, the Arduino shall continue filling the next available bottle (sampleCount is not reset on stop)
 - FR-38: The ESP32 sample count shall reset to 0 each time autonomous mode is started fresh (T command)
 
+### 3.8 Mission Logging
+
+- FR-39: Every entry to autonomous mode shall create a new CSV log file on internal flash (LittleFS), named `log_NNN.csv` with a monotonically-increasing persistent sequence number that survives power cycles (counter file `/log_counter.txt`).
+- FR-40: The logger shall sample the boat state at exactly 2 Hz (500 ms period), be fully non-blocking, and shall not introduce any `delay()` calls in the main loop.
+- FR-41: The CSV schema shall be (exact column order): `Timestamp_ms, Runtime_sec, Mode, NavState, Stuck, SampleCount, ArduinoState, TargetHeading, ActualHeading, HeadingError, LeftPower, RightPower, SampleIntervalRemaining_ms`.
+- FR-42: Log files shall be retrievable from the GUI over the ESP32 WiFi AP via `GET /logs` (HTML index) and `GET /log_NNN.csv` (CSV download stream).
+- FR-43: The log file handle shall remain open for the entire duration of a single autonomous mission. Rows shall be batched in a small RAM buffer (~512 B) and flushed to flash at the buffer size threshold and on mission exit, guaranteeing data persistence with at most ~3 s of loss on unexpected power-cut.
+- FR-44: LittleFS shall be auto-formatted on mount failure (`LittleFS.begin(true)`), so the logger requires no manual provisioning on a fresh device.
+
 ---
 
 ## 4. Performance Requirements
@@ -125,6 +134,7 @@ The Arduino shall execute the following sequence for each sample cycle:
 - PR-06: Maximum sample depth: 2.0m (hard clamped in Arduino)
 - PR-07: Turntable positioning accuracy: ±0.5° (limited by stepper resolution at 3200 steps/rev)
 - PR-08: Closed-loop heading correction shall update every `loop()` iteration during forward motion (no additional delay)
+- PR-09: Mission logger overhead per `loop()` iteration shall be bounded: at most one `snprintf` (≤220 bytes), one `String` append on a sub-512-byte buffer, and a periodic `file.flush()` (~every 3 seconds of autonomous runtime). No `delay()` and no per-row `file.open()`/`file.close()` calls.
 
 ---
 

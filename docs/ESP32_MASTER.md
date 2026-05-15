@@ -350,3 +350,52 @@ SAMPLE_COUNT:2
 | `WATER SAMPLE` | Sample wait (real or simulated) in progress |
 | `ALIGN→{deg}°` | Post-sample heading realignment in progress |
 | `STOP1` / `REVERSE` / `STOP2` / `TURN→{deg}°` / `FINAL STOP` | Active stuck-recovery sub-step |
+
+## Mission Logging (LittleFS)
+
+The ESP32 records full boat state to internal flash at 2 Hz for the duration of every autonomous mission. Logs are stored on LittleFS (~1.5 MB partition on a standard ESP32 module) and retrievable from the GUI over the WiFi AP.
+
+### Behaviour
+
+- A new log file is created automatically on every transition into autonomous mode (edge-detected by `updateLogger()`; not coupled to the `T`/`S` handlers).
+- File naming: `/log_001.csv`, `/log_002.csv`, ... zero-padded to 3 digits, grows naturally past 999.
+- Sequence number persists in `/log_counter.txt` (single integer) — never reuses a filename across reboots.
+- The file handle stays open for the entire mission. Rows are batched in a 512-byte RAM buffer (`logBuffer`) and flushed to flash either when the buffer fills (~6 rows = ~3 s of data) or on mission exit (`stopLog()`).
+- Sample rate: 500 ms gate inside `updateLogger()`, fully non-blocking. Worst-case data loss on power cut: ~3 seconds (one flush interval).
+- LittleFS is auto-formatted on first boot via `LittleFS.begin(true)` — no manual provisioning needed.
+
+### CSV schema
+
+| Column | Source | Notes |
+|---|---|---|
+| `Timestamp_ms` | `millis()` | ms since ESP32 boot |
+| `Runtime_sec` | `(millis() - autoStartMs) / 1000.0` | 3-decimal seconds since autonomous start |
+| `Mode` | `getCurrentMode()` | STOP / MANUAL / AUTONOMOUS |
+| `NavState` | `getState()` | FORWARD / FORWARD LOCK / WATER SAMPLE / ALIGN→{°} / STOP1 / REVERSE / STOP2 / TURN→{°} / FINAL STOP / STUCK |
+| `Stuck` | `stuckDetected` | `true` / `false` |
+| `SampleCount` | `sample_count` | 0..`sample_max` |
+| `ArduinoState` | `arduinoState` | Quoted CSV field (defensive against future commas in state strings) |
+| `TargetHeading` | `targetHeading` | 1 decimal, degrees |
+| `ActualHeading` | `currentHeading` | 1 decimal, degrees |
+| `HeadingError` | `headingError(target,actual)` | 1 decimal, signed −180..+180 |
+| `LeftPower` | `lastLeft` | Last commanded left motor power (0–255) |
+| `RightPower` | `lastRight` | Last commanded right motor power (0–255) |
+| `SampleIntervalRemaining_ms` | `sample_interval_ms - (now-sampleStart)` | Clamped at 0 |
+
+### HTTP endpoints
+
+| Method/Path | Function |
+|---|---|
+| `GET /logs` | `handleLogList()` — HTML index page listing all `log_*.csv` files with sizes and download links; also shows LittleFS used/total bytes |
+| `GET /log_NNN.csv` | Caught in `handleCommandPath()` — streams the file as `text/csv` for direct browser download |
+| `GET /log_counter.txt` | Same path-serving logic (debug only); contains the current sequence number |
+
+The operator simply opens `http://192.168.4.1/logs` on phone/tablet/laptop after returning from a mission and clicks the links to download.
+
+### Serial output
+
+The logger emits short diagnostics to the serial monitor:
+- `LittleFS mounted. Total=N Used=N` (at boot)
+- `LOG: started /log_NNN.csv` (on autonomous entry)
+- `LOG: closed /log_NNN.csv` (on autonomous exit)
+- `LOG: failed to open ...` / `LOG: failed to write counter` (error paths)

@@ -8,6 +8,7 @@
 #include <Adafruit_HMC5883_U.h>
 #include <ESP32Servo.h>
 #include <WebServer.h>
+#include <LittleFS.h>
 #define RXD2 16  // RX to Arduino TX (via divider)
 #define TXD2 17  // TX to Arduino RX
 
@@ -65,6 +66,23 @@ unsigned long skipSampleDelay = 10000; // Simulated sample hold time (ms, defaul
 unsigned long skipSampleStart = 0;     // Internal: timestamp for non-blocking skip
 unsigned long reverse_after_sample_duration = 7; // Reverse-motor duration at sample start in SECONDS (GUI: RSD:)
 bool sampleReverseHandled = false;     // Internal: tracks reverse phase for non-blocking skip path
+
+// -------------------- CSV Mission Logger (LittleFS) --------------------
+// Records full boat state to /log_NNN.csv at 2 Hz for the duration of each
+// autonomous mission. Sequence number persists in /log_counter.txt so
+// filenames never collide across reboots.
+File          logFile;                                 // file handle stays open for whole mission
+bool          loggerActive = false;                    // true between autonomous start and stop
+unsigned long autoStartMs  = 0;                        // millis() at autonomous mode entry — drives Runtime_sec
+unsigned long lastLogMs    = 0;                        // last row timestamp — drives 500 ms rate gate
+String        logBuffer    = "";                       // batches up to LOG_FLUSH_BYTES of CSV before file.print()
+uint32_t      logSeqNum    = 0;                        // current/last log file number
+const size_t  LOG_FLUSH_BYTES   = 512;                 // ~6 rows
+const char*   LOG_COUNTER_PATH  = "/log_counter.txt";  // single int — persistent log sequence number
+const char*   LOG_CSV_HEADER    =
+    "Timestamp_ms,Runtime_sec,Mode,NavState,Stuck,SampleCount,ArduinoState,"
+    "TargetHeading,ActualHeading,HeadingError,LeftPower,RightPower,"
+    "SampleIntervalRemaining_ms";
 
 // -------------------- PWM Channels --------------------
 const int pwmPinA = 4;         // Servo pin for left motor
@@ -1342,9 +1360,175 @@ void handleStatus() {
     server.send(200, "text/plain", status);
 }
 
+// =====================================================================
+//  CSV Mission Logger — LittleFS, append-only, 2 Hz, non-blocking
+//  - File handle stays open for the whole autonomous mission
+//  - Rows batched in a small String buffer; flushed every ~6 rows
+//  - Sequence number persists across reboots via /log_counter.txt
+//  - Entry/exit edges detected against autonomousMode flag inside
+//    updateLogger() — no coupling to T / S / mode-exit handlers
+// =====================================================================
+
+// Read persistent log sequence number. Returns 0 if file missing.
+uint32_t readLogCounter() {
+    if (!LittleFS.exists(LOG_COUNTER_PATH)) return 0;
+    File f = LittleFS.open(LOG_COUNTER_PATH, "r");
+    if (!f) return 0;
+    uint32_t n = (uint32_t)f.parseInt();
+    f.close();
+    return n;
+}
+
+// Persist current log sequence number BEFORE opening the file, so a
+// crash mid-mission never causes filename reuse after reboot.
+void writeLogCounter(uint32_t n) {
+    File f = LittleFS.open(LOG_COUNTER_PATH, "w");
+    if (!f) {
+        Serial.println("LOG: failed to write counter");
+        return;
+    }
+    f.printf("%u\n", (unsigned)n);
+    f.close();
+}
+
+// "/log_NNN.csv" — zero-padded to 3 digits. Grows naturally past 999.
+String makeLogPath(uint32_t n) {
+    char buf[24];
+    snprintf(buf, sizeof(buf), "/log_%03u.csv", (unsigned)n);
+    return String(buf);
+}
+
+// Commit RAM buffer to flash. Cheap if buffer is empty.
+void flushLogBuffer() {
+    if (!logFile || logBuffer.length() == 0) return;
+    logFile.print(logBuffer);
+    logFile.flush();      // forces commit to flash — survives power loss from here
+    logBuffer = "";
+}
+
+// Open a new log file at the next sequence number and write the header.
+void startNewLog() {
+    logSeqNum = readLogCounter() + 1;
+    writeLogCounter(logSeqNum);              // persist BEFORE open
+    String path = makeLogPath(logSeqNum);
+    logFile = LittleFS.open(path, "w");
+    if (!logFile) {
+        Serial.println("LOG: failed to open " + path);
+        return;
+    }
+    logFile.println(LOG_CSV_HEADER);
+    logFile.flush();
+    logBuffer = "";
+    Serial.println("LOG: started " + path);
+}
+
+// Mission-end cleanup. Flush remaining buffer + close so FS is consistent.
+void stopLog() {
+    flushLogBuffer();
+    if (logFile) {
+        logFile.close();
+        Serial.println("LOG: closed " + makeLogPath(logSeqNum));
+    }
+}
+
+// Build one CSV row and append to buffer; flush if buffer is full.
+// snprintf into a small stack buffer — no heap churn per row.
+void writeLogRow() {
+    if (!logFile) return;
+
+    unsigned long now = millis();
+    float runtimeSec  = (float)(now - autoStartMs) / 1000.0f;
+    float err         = headingError(targetHeading, currentHeading);
+    long  sampleRem   = (long)sample_interval_ms - (long)(now - sampleStart);
+    if (sampleRem < 0) sampleRem = 0;
+
+    char row[220];
+    // ArduinoState wrapped in "..." in case a future state string contains a comma.
+    snprintf(row, sizeof(row),
+        "%lu,%.3f,%s,%s,%s,%d,\"%s\",%.1f,%.1f,%.1f,%d,%d,%ld\n",
+        now,
+        runtimeSec,
+        getCurrentMode().c_str(),
+        getState().c_str(),
+        stuckDetected ? "true" : "false",
+        sample_count,
+        arduinoState.c_str(),
+        targetHeading,
+        currentHeading,
+        err,
+        lastLeft,
+        lastRight,
+        sampleRem);
+
+    logBuffer += row;
+    if (logBuffer.length() >= LOG_FLUSH_BYTES) flushLogBuffer();
+}
+
+// Single entry point called from loop(). Edge-detects autonomousMode
+// transitions and gates the 2 Hz sample rate.
+void updateLogger() {
+    // Edge UP — autonomous just started
+    if (autonomousMode && !loggerActive) {
+        startNewLog();
+        if (logFile) {
+            loggerActive = true;
+            autoStartMs  = millis();
+            lastLogMs    = 0;       // force first row immediately
+        }
+        return;
+    }
+    // Edge DOWN — autonomous just ended (STOP, sample limit, mode change, etc)
+    if (!autonomousMode && loggerActive) {
+        stopLog();
+        loggerActive = false;
+        return;
+    }
+    // Steady-state — 2 Hz row write
+    if (loggerActive && (millis() - lastLogMs >= 500)) {
+        writeLogRow();
+        lastLogMs = millis();
+    }
+}
+
+// -------- HTTP: GET /logs → simple HTML index page --------
+void handleLogList() {
+    String out =
+        "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>SRV-01 Logs</title><style>body{font-family:sans-serif;background:#0c1116;color:#e0e0e0;padding:20px}"
+        "a{color:#4cb}li{margin:6px 0}</style></head><body><h2>SRV-01 Mission Logs</h2>";
+    out += "<p>LittleFS: " + String(LittleFS.usedBytes()) + " / "
+         + String(LittleFS.totalBytes()) + " bytes used</p><ul>";
+    File root = LittleFS.open("/");
+    File f = root.openNextFile();
+    while (f) {
+        String name = f.name();
+        // LittleFS may return name with or without leading "/"
+        String base = name.startsWith("/") ? name.substring(1) : name;
+        if (base.startsWith("log_") && base.endsWith(".csv")) {
+            out += "<li><a href='/" + base + "'>" + base + "</a>  ("
+                 + String(f.size()) + " bytes)</li>";
+        }
+        f = root.openNextFile();
+    }
+    out += "</ul><p><a href='/'>&larr; Back to control</a></p></body></html>";
+    server.send(200, "text/html", out);
+}
+
 void handleCommandPath() {
     String msg = server.uri().substring(1);
     msg.trim();
+
+    // -------- Serve log files: /log_NNN.csv --------
+    if (msg.startsWith("log_") && msg.endsWith(".csv")) {
+        String path = "/" + msg;
+        if (!LittleFS.exists(path)) { server.send(404, "text/plain", "Not found"); return; }
+        File f = LittleFS.open(path, "r");
+        if (!f) { server.send(500, "text/plain", "Open failed"); return; }
+        server.streamFile(f, "text/csv");
+        f.close();
+        return;
+    }
+
     if (msg.length() == 1) {
         handleCommand(msg[0]);
     } else {
@@ -1463,6 +1647,15 @@ void setup() {
     WiFi.softAP(ssid, password);
     Serial.println("Wi-Fi AP Started. IP: " + WiFi.softAPIP().toString());
     Wire.begin();
+
+    // LittleFS for mission logging — auto-format on mount failure.
+    if (!LittleFS.begin(true)) {
+        Serial.println("LittleFS mount FAILED — logger disabled");
+    } else {
+        Serial.println("LittleFS mounted. Total=" + String(LittleFS.totalBytes())
+                       + " Used=" + String(LittleFS.usedBytes()));
+    }
+
     if (!mag.begin()) {
         Serial.println("Magnetometer initialization failed!");
         while (1);
@@ -1471,6 +1664,7 @@ void setup() {
 
     server.on("/",       HTTP_GET, handleRoot);
     server.on("/status", HTTP_GET, handleStatus);
+    server.on("/logs",   HTTP_GET, handleLogList);
     server.onNotFound(handleCommandPath);
     server.begin();
     Serial2.begin(115200, SERIAL_8N1, RXD2, TXD2); // UART to Arduino
@@ -1499,6 +1693,11 @@ void loop() {
 
     // Update LED
     updateLED();
+
+    // Mission logger — non-blocking, 2 Hz, only active in autonomous mode.
+    // Edge-detects autonomousMode transitions internally; no coupling to
+    // motor/sample logic below.
+    updateLogger();
 
     if (stopMode) {
         stopCar();
