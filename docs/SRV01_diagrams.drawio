@@ -1,0 +1,913 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile version="21.0.0">
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PAGE 1 — System Architecture
+       ═══════════════════════════════════════════════════════════════ -->
+  <diagram id="arch" name="1 - System Architecture">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1"
+                  tooltips="1" connect="1" arrows="1" fold="1" page="1"
+                  pageScale="1" pageWidth="1654" pageHeight="1169">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- TITLE -->
+        <mxCell id="2" value="SRV-01 AquaBot — System Architecture" vertex="1" parent="1"
+          style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=22;fontStyle=1;verticalAlign=middle;">
+          <mxGeometry x="300" y="20" width="760" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- WiFi Client -->
+        <mxCell id="3" value="WiFi Client&#xa;Browser / Mobile App" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;fontStyle=1;">
+          <mxGeometry x="570" y="80" width="220" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- HTTP arrow Browser → ESP32 -->
+        <mxCell id="4" value="HTTP GET · Port 80&#xa;WiFi 2.4 GHz · SSID: ESP32_Robot_HTML&#xa;IP: 192.168.4.1"
+          edge="1" source="3" target="5" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ─── ESP32 Master swimlane ─── -->
+        <mxCell id="5" value="ESP32 Master  (firmware v28.3 / GUI v8.4)" vertex="1" parent="1"
+          style="swimlane;fontStyle=1;fontSize=14;startSize=35;fillColor=#f0f7ff;strokeColor=#6c8ebf;rounded=1;">
+          <mxGeometry x="140" y="200" width="850" height="320" as="geometry"/>
+        </mxCell>
+
+        <!-- WebServer module -->
+        <mxCell id="6" value="WebServer (port 80)&#xa;HTML/JS GUI&#xa;/status endpoint&#xa;handleCommandPath router" vertex="1" parent="5"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;">
+          <mxGeometry x="20" y="50" width="190" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- Navigation Controller -->
+        <mxCell id="7" value="Navigation Controller&#xa;Modes: STOP / MANUAL / AUTO&#xa;Microswitch debounce&#xa;Forward-lock timer" vertex="1" parent="5"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;">
+          <mxGeometry x="230" y="50" width="190" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- Motor Controller -->
+        <mxCell id="8" value="Motor Controller&#xa;4× ESC PWM outputs&#xa;Motor_Power / Turn_Power&#xa;Motor_Offset trim" vertex="1" parent="5"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6b656;fontSize=12;">
+          <mxGeometry x="440" y="50" width="190" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- Magnetometer module -->
+        <mxCell id="9" value="HMC5883L Magnetometer&#xa;I2C via Wire library&#xa;Heading + 4° East declination" vertex="1" parent="5"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;">
+          <mxGeometry x="650" y="50" width="185" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- Stuck Recovery FSM -->
+        <mxCell id="10" value="Stuck Recovery FSM&#xa;5-step non-blocking&#xa;Stop→Reverse→Stop&#xa;→Turn→Final Stop" vertex="1" parent="5"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;">
+          <mxGeometry x="20" y="165" width="190" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- Autonomous Sampler -->
+        <mxCell id="11" value="Autonomous Sampler&#xa;sample_interval timer&#xa;Max-samples gate&#xa;No-sampler simulate mode" vertex="1" parent="5"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;">
+          <mxGeometry x="230" y="165" width="190" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- Serial2 UART -->
+        <mxCell id="12" value="Serial2 UART&#xa;TX GPIO 17 / RX GPIO 16&#xa;115200 baud" vertex="1" parent="5"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=12;">
+          <mxGeometry x="440" y="165" width="190" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- LED Controller -->
+        <mxCell id="13" value="LED Status Controller&#xa;STOP→White  MANUAL→Green&#xa;AUTO→Blue  STUCK→Red" vertex="1" parent="5"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6b656;fontSize=12;">
+          <mxGeometry x="650" y="165" width="185" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- UART arrow ESP32 ↔ Arduino -->
+        <mxCell id="14" value="UART Serial2 · 115200 baud&#xa;Commands: :M1 :P0…:P5 :D1 :SD :FT :BT&#xa;Acks: :X1 (done) / :FULL (memory full)"
+          edge="1" source="5" target="15" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;endArrow=open;startArrow=open;startFill=0;endFill=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ─── Arduino Uno swimlane ─── -->
+        <mxCell id="15" value="Arduino Uno — Sampling Platform (Slave)" vertex="1" parent="1"
+          style="swimlane;fontStyle=1;fontSize=13;startSize=35;fillColor=#fff8f0;strokeColor=#d6b656;rounded=1;">
+          <mxGeometry x="1060" y="200" width="280" height="320" as="geometry"/>
+        </mxCell>
+
+        <!-- Turntable -->
+        <mxCell id="16" value="Turntable Control&#xa;6 positions (0–5)&#xa;Cmds: :P0 … :P5" vertex="1" parent="15"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6b656;fontSize=12;">
+          <mxGeometry x="20" y="50" width="240" height="65" as="geometry"/>
+        </mxCell>
+
+        <!-- Depth -->
+        <mxCell id="17" value="Depth Control (0–2 m)&#xa;Cmd :D1 / :E1 / :F1 / :SD&lt;val&gt;" vertex="1" parent="15"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;">
+          <mxGeometry x="20" y="130" width="240" height="65" as="geometry"/>
+        </mxCell>
+
+        <!-- Pumps -->
+        <mxCell id="18" value="Flush Pump + Fill Pump&#xa;Flush: :FT__s   Fill: :BT__s&#xa;Full cycle: :M1&#xa;Done ack: :X1 / :FULL" vertex="1" parent="15"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;">
+          <mxGeometry x="20" y="210" width="240" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- ─── Hardware row ─── -->
+
+        <!-- ESC Left -->
+        <mxCell id="19" value="ESC Left (GPIO 4)&#xa;+ Reverse ctrl (GPIO 18)&#xa;PWM 1000–1500 µs" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=12;">
+          <mxGeometry x="60" y="620" width="190" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Motor Left -->
+        <mxCell id="20" value="Motor Left&#xa;(thruster)" vertex="1" parent="1"
+          style="ellipse;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=13;fontStyle=1;">
+          <mxGeometry x="80" y="735" width="150" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- ESC Right -->
+        <mxCell id="21" value="ESC Right (GPIO 14)&#xa;+ Reverse ctrl (GPIO 19)&#xa;PWM 1000–1500 µs" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=12;">
+          <mxGeometry x="270" y="620" width="190" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Motor Right -->
+        <mxCell id="22" value="Motor Right&#xa;(thruster)" vertex="1" parent="1"
+          style="ellipse;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=13;fontStyle=1;">
+          <mxGeometry x="290" y="735" width="150" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Microswitches -->
+        <mxCell id="23" value="Microswitches (INPUT_PULLUP)&#xa;Left  : GPIO 13&#xa;Front : GPIO 25&#xa;Right : GPIO 26" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;">
+          <mxGeometry x="480" y="615" width="200" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- HMC5883L hardware -->
+        <mxCell id="24" value="HMC5883L&#xa;I2C Magnetometer" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;">
+          <mxGeometry x="700" y="615" width="180" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- LEDs hardware -->
+        <mxCell id="25" value="Status LEDs&#xa;Red   GPIO 27&#xa;Green GPIO 12&#xa;Blue  GPIO 33  White GPIO 32" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6b656;fontSize=12;">
+          <mxGeometry x="900" y="615" width="195" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Edges: ESP32 → hardware -->
+        <mxCell id="26" value="PWM" edge="1" source="5" target="19" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="27" value="PWM" edge="1" source="5" target="21" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="28" value="digitalRead" edge="1" source="23" target="5" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="29" value="I2C" edge="1" source="24" target="5" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="30" value="digitalWrite" edge="1" source="5" target="25" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="31" value="" edge="1" source="19" target="20" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="32" value="" edge="1" source="21" target="22" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PAGE 2 — Main Loop Flowchart
+       ═══════════════════════════════════════════════════════════════ -->
+  <diagram id="mainloop" name="2 - Main Loop Flow">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1"
+                  tooltips="1" connect="1" arrows="1" fold="1" page="1"
+                  pageScale="1" pageWidth="1169" pageHeight="1654">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- TITLE -->
+        <mxCell id="2" value="SRV-01 AquaBot — Main Loop() Flow" vertex="1" parent="1"
+          style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=20;fontStyle=1;verticalAlign=middle;">
+          <mxGeometry x="160" y="10" width="600" height="35" as="geometry"/>
+        </mxCell>
+
+        <!-- START -->
+        <mxCell id="3" value="START: setup()&#xa;Init ESC, WiFi AP, Magnetometer&#xa;Wire, Switches, LEDs, Serial2" vertex="1" parent="1"
+          style="ellipse;whiteSpace=wrap;html=1;fillColor=#000000;fontColor=#ffffff;strokeColor=#000000;fontSize=12;fontStyle=1;">
+          <mxGeometry x="170" y="55" width="260" height="65" as="geometry"/>
+        </mxCell>
+
+        <!-- Loop top -->
+        <mxCell id="4" value="loop() — top of every iteration" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;fontStyle=1;">
+          <mxGeometry x="170" y="160" width="260" height="45" as="geometry"/>
+        </mxCell>
+
+        <!-- server.handleClient + updateLED -->
+        <mxCell id="5" value="server.handleClient()&#xa;updateLED()" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=12;">
+          <mxGeometry x="155" y="245" width="290" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- stopMode? -->
+        <mxCell id="6" value="stopMode?" vertex="1" parent="1"
+          style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;fontStyle=1;">
+          <mxGeometry x="175" y="335" width="250" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- stopCar -->
+        <mxCell id="7" value="stopCar()&#xa;(all motors off)" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;">
+          <mxGeometry x="530" y="345" width="200" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- manualMode? -->
+        <mxCell id="8" value="manualMode?" vertex="1" parent="1"
+          style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;fontStyle=1;">
+          <mxGeometry x="175" y="455" width="250" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Manual mode actions -->
+        <mxCell id="9" value="Manual Mode Active&#xa;Log heartbeat every 2s&#xa;readSerial2NonBlocking()&#xa;(catch :X1 / :FULL from Arduino)" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;">
+          <mxGeometry x="520" y="445" width="220" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- autonomousMode? -->
+        <mxCell id="10" value="autonomousMode?" vertex="1" parent="1"
+          style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;fontStyle=1;">
+          <mxGeometry x="175" y="575" width="250" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- AUTO: stuckDetected? -->
+        <mxCell id="11" value="stuckDetected?" vertex="1" parent="1"
+          style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;fontStyle=1;">
+          <mxGeometry x="175" y="695" width="250" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- handleStuckNonBlocking -->
+        <mxCell id="12" value="handleStuckNonBlocking()&#xa;(see Page 3 for detail)" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;">
+          <mxGeometry x="520" y="705" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- sampling? -->
+        <mxCell id="13" value="sampling?" vertex="1" parent="1"
+          style="rhombus;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;fontStyle=1;">
+          <mxGeometry x="175" y="815" width="250" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- stopCar (before sampling) -->
+        <mxCell id="14" value="stopCar()&#xa;(hold position during sample)" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;">
+          <mxGeometry x="175" y="930" width="250" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- isWaterSamplerOnBoard? -->
+        <mxCell id="15" value="isWaterSamplerOnBoard?" vertex="1" parent="1"
+          style="rhombus;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;fontStyle=1;">
+          <mxGeometry x="175" y="1030" width="250" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- performAutoSample (blocking) -->
+        <mxCell id="16" value="performAutoSample()&#xa;BLOCKING — owns Serial2&#xa;200s timeout&#xa;(see Page 3 for detail)" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;">
+          <mxGeometry x="520" y="1020" width="220" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- Simulated sample (non-blocking) -->
+        <mxCell id="17" value="Simulated sample&#xa;(non-blocking delay)&#xa;skipSampleDelay ms&#xa;→ sample_count++" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;">
+          <mxGeometry x="520" y="1130" width="220" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- moveForwardAutonomous -->
+        <mxCell id="18" value="moveForwardAutonomous()&#xa;(both motors forward)" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;">
+          <mxGeometry x="175" y="1260" width="250" height="55" as="geometry"/>
+        </mxCell>
+
+        <!-- checkSwitches -->
+        <mxCell id="19" value="checkSwitches()&#xa;(debounced: L=1, F=3, R=5)" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=12;">
+          <mxGeometry x="175" y="1360" width="250" height="55" as="geometry"/>
+        </mxCell>
+
+        <!-- switchHit AND past fwdLock? -->
+        <mxCell id="20" value="switchHit &gt; 0 AND&#xa;past forward_lock_ms?" vertex="1" parent="1"
+          style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;">
+          <mxGeometry x="175" y="1460" width="250" height="75" as="geometry"/>
+        </mxCell>
+
+        <!-- trigger stuck -->
+        <mxCell id="21" value="stuckDetected = true&#xa;setTurnDirection(switchHit)&#xa;lastDebounceTime = millis()" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;">
+          <mxGeometry x="520" y="1470" width="220" height="55" as="geometry"/>
+        </mxCell>
+
+        <!-- sample_interval elapsed? -->
+        <mxCell id="22" value="millis() - sampleStart&#xa;&gt;= sample_interval_ms?" vertex="1" parent="1"
+          style="rhombus;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1;">
+          <mxGeometry x="175" y="1590" width="250" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- sampling = true -->
+        <mxCell id="23" value="sampling = true" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;">
+          <mxGeometry x="520" y="1600" width="180" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Back to top label -->
+        <mxCell id="24" value="↩ back to loop() top" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=2;">
+          <mxGeometry x="200" y="1720" width="200" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- ─── EDGES ─── -->
+
+        <!-- START → loop top -->
+        <mxCell id="30" value="" edge="1" source="3" target="4" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- loop top → handleClient -->
+        <mxCell id="31" value="" edge="1" source="4" target="5" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- handleClient → stopMode? -->
+        <mxCell id="32" value="" edge="1" source="5" target="6" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- stopMode? YES → stopCar -->
+        <mxCell id="33" value="YES" edge="1" source="6" target="7" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- stopMode? NO → manualMode? -->
+        <mxCell id="34" value="NO" edge="1" source="6" target="8" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- manualMode? YES → manual actions -->
+        <mxCell id="35" value="YES" edge="1" source="8" target="9" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- manualMode? NO → autonomousMode? -->
+        <mxCell id="36" value="NO" edge="1" source="8" target="10" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- autonomousMode? YES → stuckDetected? -->
+        <mxCell id="37" value="YES" edge="1" source="10" target="11" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- autonomousMode? NO → loop back -->
+        <mxCell id="38" value="NO" edge="1" source="10" target="24" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="80" y="610"/>
+              <mxPoint x="80" y="1740"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- stuckDetected? YES → handleStuck -->
+        <mxCell id="39" value="YES" edge="1" source="11" target="12" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- stuckDetected? NO → sampling? -->
+        <mxCell id="40" value="NO" edge="1" source="11" target="13" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- sampling? YES → stopCar (hold) -->
+        <mxCell id="41" value="YES" edge="1" source="13" target="14" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- stopCar (hold) → isWaterSamplerOnBoard? -->
+        <mxCell id="42" value="" edge="1" source="14" target="15" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- sampling? NO → moveForward (skip isWaterSampler, route left) -->
+        <mxCell id="43" value="NO" edge="1" source="13" target="18" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="100" y="850"/>
+              <mxPoint x="100" y="1287"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- isWaterSamplerOnBoard? YES → performAutoSample -->
+        <mxCell id="44" value="YES" edge="1" source="15" target="16" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- isWaterSamplerOnBoard? NO → simulated sample -->
+        <mxCell id="45" value="NO" edge="1" source="15" target="17" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=1;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="760" y="1100"/>
+              <mxPoint x="760" y="1130"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- moveForward → checkSwitches -->
+        <mxCell id="46" value="" edge="1" source="18" target="19" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- checkSwitches → switchHit? -->
+        <mxCell id="47" value="" edge="1" source="19" target="20" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- switchHit? YES → trigger stuck -->
+        <mxCell id="48" value="YES" edge="1" source="20" target="21" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- switchHit? NO → interval elapsed? -->
+        <mxCell id="49" value="NO" edge="1" source="20" target="22" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- interval elapsed? YES → sampling=true -->
+        <mxCell id="50" value="YES" edge="1" source="22" target="23" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- interval elapsed? NO → loop back -->
+        <mxCell id="51" value="NO" edge="1" source="22" target="24" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- sampling=true → loop back -->
+        <mxCell id="52" value="" edge="1" source="23" target="24" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="610" y="1760"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- trigger stuck → loop back -->
+        <mxCell id="53" value="" edge="1" source="21" target="24" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="630" y="1760"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- handleStuck → loop back (via right side) -->
+        <mxCell id="54" value="" edge="1" source="12" target="24" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="760" y="730"/>
+              <mxPoint x="760" y="1760"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- stopCar (stopMode YES) → loop back -->
+        <mxCell id="55" value="" edge="1" source="7" target="24" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="740" y="370"/>
+              <mxPoint x="740" y="1760"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- manual actions → loop back -->
+        <mxCell id="56" value="" edge="1" source="9" target="24" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="750" y="490"/>
+              <mxPoint x="750" y="1760"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- performAutoSample → loop back -->
+        <mxCell id="57" value="" edge="1" source="16" target="24" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="770" y="1065"/>
+              <mxPoint x="770" y="1760"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- simulated sample → loop back -->
+        <mxCell id="58" value="" edge="1" source="17" target="24" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="780" y="1175"/>
+              <mxPoint x="780" y="1760"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- loop back → loop top (the actual loop arrow) -->
+        <mxCell id="59" value="repeat" edge="1" source="24" target="4" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=2;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#82b366;fontColor=#82b366;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="50" y="1740"/>
+              <mxPoint x="50" y="182"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PAGE 3 — Sampling Detail + Stuck Recovery FSM
+       ═══════════════════════════════════════════════════════════════ -->
+  <diagram id="detail" name="3 - Sampling and Stuck Recovery">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1"
+                  tooltips="1" connect="1" arrows="1" fold="1" page="1"
+                  pageScale="1" pageWidth="1654" pageHeight="1169">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- TITLE -->
+        <mxCell id="2" value="SRV-01 AquaBot — Sampling Detail &amp; Stuck Recovery FSM" vertex="1" parent="1"
+          style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=20;fontStyle=1;verticalAlign=middle;">
+          <mxGeometry x="200" y="10" width="900" height="35" as="geometry"/>
+        </mxCell>
+
+        <!-- ══════════  LEFT COLUMN: performAutoSample()  ══════════ -->
+
+        <!-- Section header -->
+        <mxCell id="3" value="performAutoSample() — Autonomous Water Collection" vertex="1" parent="1"
+          style="text;html=1;strokeColor=none;fillColor=#dae8fc;align=center;fontSize=15;fontStyle=1;verticalAlign=middle;rounded=1;strokeColor=#6c8ebf;">
+          <mxGeometry x="40" y="60" width="490" height="35" as="geometry"/>
+        </mxCell>
+
+        <!-- Safety check -->
+        <mxCell id="4" value="sample_count &gt;= sample_max?" vertex="1" parent="1"
+          style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;">
+          <mxGeometry x="90" y="115" width="250" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Exit autonomous -->
+        <mxCell id="5" value="autonomousMode = false&#xa;stopMode = true&#xa;stopCar()  RETURN" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;">
+          <mxGeometry x="400" y="125" width="200" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Clear buffer + send :M1 -->
+        <mxCell id="6" value="Clear Serial2 buffer&#xa;Send :M1 to Arduino&#xa;arduinoState = &quot;Auto Sampling...&quot;" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;">
+          <mxGeometry x="90" y="215" width="250" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Wait loop -->
+        <mxCell id="7" value="Smart-Wait Loop&#xa;(max 200 s timeout)" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#333333;fontSize=13;fontStyle=1;">
+          <mxGeometry x="90" y="325" width="250" height="45" as="geometry"/>
+        </mxCell>
+
+        <!-- server.handleClient inside loop -->
+        <mxCell id="8" value="server.handleClient()&#xa;(keep GUI responsive)" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;">
+          <mxGeometry x="90" y="400" width="250" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- stopMode inside loop? -->
+        <mxCell id="9" value="stopMode set&#xa;(user pressed STOP)?" vertex="1" parent="1"
+          style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;">
+          <mxGeometry x="90" y="480" width="250" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- timeout? -->
+        <mxCell id="10" value="200 s timeout&#xa;expired?" vertex="1" parent="1"
+          style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;">
+          <mxGeometry x="90" y="590" width="250" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Serial2 available? -->
+        <mxCell id="11" value="Serial2 data&#xa;available?" vertex="1" parent="1"
+          style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;">
+          <mxGeometry x="90" y="700" width="250" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Read + parse cmd -->
+        <mxCell id="12" value="Read byte, append to cmd buffer&#xa;Newline received?" vertex="1" parent="1"
+          style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;">
+          <mxGeometry x="90" y="810" width="250" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- received :X1? -->
+        <mxCell id="13" value="cmd == &quot;:X1&quot;&#xa;(Task Done)?" vertex="1" parent="1"
+          style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;">
+          <mxGeometry x="90" y="920" width="250" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- received :FULL? -->
+        <mxCell id="14" value="cmd == &quot;:FULL&quot;?" vertex="1" parent="1"
+          style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;">
+          <mxGeometry x="90" y="1030" width="250" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Update state string -->
+        <mxCell id="15" value="Update arduinoState string&#xa;(progress status messages)&#xa;→ loop back to wait-top" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=12;">
+          <mxGeometry x="90" y="1140" width="250" height="65" as="geometry"/>
+        </mxCell>
+
+        <!-- taskDone outcome -->
+        <mxCell id="16" value="taskDone = true  BREAK&#xa;arduinoState = &quot;Sample Done&quot;" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;">
+          <mxGeometry x="400" y="930" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- :FULL outcome -->
+        <mxCell id="17" value="arduinoState = &quot;Memory Full&quot;&#xa;→ loop back (no break)" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;">
+          <mxGeometry x="400" y="1040" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Abort outcomes (top right) -->
+        <mxCell id="18" value="arduinoState = &quot;Aborted&quot;&#xa;autonomousMode=false  stopCar()" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;">
+          <mxGeometry x="400" y="490" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Timeout outcome -->
+        <mxCell id="19" value="arduinoState = &quot;Timeout Error&quot;&#xa;autonomousMode=false  stopCar()" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;">
+          <mxGeometry x="400" y="600" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Success: sample_count++ -->
+        <mxCell id="20" value="sample_count++&#xa;sampleStart = millis()&#xa;sampling = false  RETURN" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;">
+          <mxGeometry x="90" y="1250" width="250" height="65" as="geometry"/>
+        </mxCell>
+
+        <!-- Arduino state machine progress labels box -->
+        <mxCell id="21" value="Arduino State Progress Messages&#xa;─────────────────────────────&#xa;Starting auto sample cycle&#xa;Turning to home position&#xa;Drum lowering to sample depth&#xa;Drum at depth - settling before flush&#xa;Flushing at depth&#xa;Flush done - settling&#xa;Turning to bottle N&#xa;At bottle - settling before sample&#xa;Sampling bottle&#xa;Sample done - settling&#xa;Returning turntable to home&#xa;Turntable home - retracting drum&#xa;Cycle complete - sent :X1" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=11;align=left;">
+          <mxGeometry x="640" y="390" width="270" height="280" as="geometry"/>
+        </mxCell>
+
+        <!-- Sampling edges -->
+        <mxCell id="50" value="" edge="1" source="4" target="5" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="51" value="YES — max reached" edge="1" source="4" target="5" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;fontStyle=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="52" value="NO" edge="1" source="4" target="6" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="53" value="" edge="1" source="6" target="7" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="54" value="" edge="1" source="7" target="8" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="55" value="" edge="1" source="8" target="9" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="56" value="YES" edge="1" source="9" target="18" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="57" value="NO" edge="1" source="9" target="10" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="58" value="YES" edge="1" source="10" target="19" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="59" value="NO" edge="1" source="10" target="11" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="60" value="YES" edge="1" source="11" target="12" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="61" value="NO — wait" edge="1" source="11" target="8" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;fontStyle=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="40" y="735"/>
+              <mxPoint x="40" y="425"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="62" value="YES (newline)" edge="1" source="12" target="13" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;fontStyle=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="63" value="NO" edge="1" source="12" target="11" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;fontStyle=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=1;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="55" y="845"/>
+              <mxPoint x="55" y="770"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="64" value="YES" edge="1" source="13" target="16" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="65" value="NO" edge="1" source="13" target="14" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="66" value="YES" edge="1" source="14" target="17" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="67" value="NO" edge="1" source="14" target="15" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=11;fontStyle=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="68" value="loop back to wait" edge="1" source="15" target="8" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;fontStyle=2;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="30" y="1172"/>
+              <mxPoint x="30" y="425"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="69" value="taskDone=true → " edge="1" source="16" target="20" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="510" y="955"/>
+              <mxPoint x="510" y="1282"/>
+              <mxPoint x="340" y="1282"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ══════════  RIGHT COLUMN: Stuck Recovery FSM  ══════════ -->
+
+        <!-- Section header -->
+        <mxCell id="70" value="Stuck Recovery FSM — handleStuckNonBlocking()" vertex="1" parent="1"
+          style="text;html=1;strokeColor=none;fillColor=#f8cecc;align=center;fontSize=15;fontStyle=1;verticalAlign=middle;rounded=1;strokeColor=#b85450;">
+          <mxGeometry x="960" y="60" width="490" height="35" as="geometry"/>
+        </mxCell>
+
+        <!-- Note: non-blocking -->
+        <mxCell id="71" value="Called every loop() iteration while stuckDetected=true.&#xa;Uses millis() timers — never blocks." vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=2;">
+          <mxGeometry x="960" y="110" width="490" height="45" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 0 -->
+        <mxCell id="72" value="stuckStep == 0&#xa;─────────────&#xa;stopCar()&#xa;stuckStart = millis()&#xa;stuckStep = 1" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;align=left;">
+          <mxGeometry x="960" y="175" width="220" height="100" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 1 -->
+        <mxCell id="73" value="stuckStep == 1&#xa;─────────────&#xa;Wait STUCK_STOP_TIME_1 (400 ms)&#xa;→ moveBackward()&#xa;stuckStep = 2" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;align=left;">
+          <mxGeometry x="960" y="295" width="220" height="100" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 2 -->
+        <mxCell id="74" value="stuckStep == 2&#xa;─────────────&#xa;Wait STUCK_REVERSE_TIME (2000 ms)&#xa;→ stopCar()&#xa;stuckStep = 3" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;align=left;">
+          <mxGeometry x="960" y="415" width="220" height="100" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 3 -->
+        <mxCell id="75" value="stuckStep == 3&#xa;─────────────&#xa;Wait STUCK_STOP_TIME_2 (400 ms)&#xa;→ random turn L or R&#xa;   (min_turn_ms … max_turn_ms)&#xa;stuckStep = 4" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;align=left;">
+          <mxGeometry x="960" y="535" width="220" height="110" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 4 -->
+        <mxCell id="76" value="stuckStep == 4&#xa;─────────────&#xa;Wait currentTurnDuration ms&#xa;→ stopCar()&#xa;stuckStep = 5" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;align=left;">
+          <mxGeometry x="960" y="665" width="220" height="100" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 5 -->
+        <mxCell id="77" value="stuckStep == 5&#xa;─────────────&#xa;Wait STUCK_FINAL_STOP_TIME (400 ms)&#xa;→ stuckDetected = false&#xa;   stuckStep = 0&#xa;   forwardLockStart = millis()&#xa;   &quot;Stuck ended&quot; — resume FORWARD" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;align=left;">
+          <mxGeometry x="960" y="785" width="220" height="130" as="geometry"/>
+        </mxCell>
+
+        <!-- Turn direction logic -->
+        <mxCell id="78" value="setTurnDirection(switchHit)&#xa;────────────────────────&#xa;Left switch  (1) → turn RIGHT&#xa;Right switch (5) → turn LEFT&#xa;Front switch (3) → random L/R" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;align=left;">
+          <mxGeometry x="1220" y="535" width="230" height="110" as="geometry"/>
+        </mxCell>
+
+        <!-- Timing parameters reference -->
+        <mxCell id="79" value="Default Timing Parameters&#xa;(all tunable via GUI)&#xa;────────────────────────────&#xa;STUCK_STOP_TIME_1   :  400 ms&#xa;STUCK_REVERSE_TIME  : 2000 ms&#xa;STUCK_STOP_TIME_2   :  400 ms&#xa;min_turn_ms         : 3000 ms&#xa;max_turn_ms         : 6000 ms&#xa;STUCK_FINAL_STOP_TIME: 400 ms&#xa;forward_lock_ms     : 2000 ms" vertex="1" parent="1"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=12;align=left;">
+          <mxGeometry x="1220" y="175" width="230" height="220" as="geometry"/>
+        </mxCell>
+
+        <!-- Stuck FSM edges (vertical chain) -->
+        <mxCell id="80" value="" edge="1" source="72" target="73" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="81" value="" edge="1" source="73" target="74" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="82" value="" edge="1" source="74" target="75" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="83" value="" edge="1" source="75" target="76" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="84" value="" edge="1" source="76" target="77" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="85" value="turn direction" edge="1" source="75" target="78" parent="1"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;fontStyle=2;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+</mxfile>

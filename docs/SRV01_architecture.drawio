@@ -1,0 +1,344 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1"
+              connect="1" arrows="1" fold="1" page="1" pageScale="1"
+              pageWidth="1654" pageHeight="1400" math="0" shadow="0">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+
+    <!-- ═══════════════════════════════════════════════════════
+         TITLE
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="2"
+      value="SRV-01 AquaBot — Control Architecture"
+      style="text;html=1;strokeColor=none;fillColor=none;align=center;
+             verticalAlign=middle;whiteSpace=wrap;rounded=0;
+             fontSize=20;fontStyle=1;"
+      vertex="1" parent="1">
+      <mxGeometry x="260" y="5" width="420" height="30" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         SYSTEM BOOT
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="3"
+      value="&lt;b&gt;SYSTEM BOOT&lt;/b&gt;&lt;br&gt;
+             • WiFi Access Point started (192.168.4.1)&lt;br&gt;
+             • Magnetometer initialized (HMC5883L, I²C)&lt;br&gt;
+             • Flash file system mounted (LittleFS)&lt;br&gt;
+             • Web server started → GUI served to operator"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#dae8fc;strokeColor=#6c8ebf;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="260" y="40" width="420" height="100" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         STOP MODE
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="4"
+      value="&lt;b&gt;STOP MODE&lt;/b&gt; (default)&lt;br&gt;
+             • All motors off&lt;br&gt;
+             • Operator must ARM ESCs before any motion"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#ffe6cc;strokeColor=#d6b656;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="260" y="210" width="420" height="80" as="geometry" />
+    </mxCell>
+
+    <!-- Boot → Stop -->
+    <mxCell id="5"
+      style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="3" target="4" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         MANUAL MODE
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="6"
+      value="&lt;b&gt;MANUAL MODE&lt;/b&gt;&lt;br&gt;
+             • Operator joystick controls&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;motors directly via GUI&lt;br&gt;
+             • Sampling platform buttons&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;relay commands to Arduino (UART)"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#d5e8d4;strokeColor=#82b366;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="30" y="390" width="210" height="120" as="geometry" />
+    </mxCell>
+
+    <!-- Stop → Manual -->
+    <mxCell id="8"
+      value="ARM + Manual"
+      style="edgeStyle=orthogonalEdgeStyle;
+             exitX=0.1;exitY=1;exitDx=0;exitDy=0;
+             entryX=0.5;entryY=0;entryDx=0;entryDy=0;"
+      edge="1" source="4" target="6" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         AUTONOMOUS MODE
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="7"
+      value="&lt;b&gt;AUTONOMOUS MODE&lt;/b&gt;&lt;br&gt;
+             • Lock current compass heading as target (HDG₀)&lt;br&gt;
+             • Reset sample counter&lt;br&gt;
+             • Start mission logger"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#dae8fc;strokeColor=#6c8ebf;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="375" y="390" width="270" height="110" as="geometry" />
+    </mxCell>
+
+    <!-- Stop → Auto -->
+    <mxCell id="9"
+      value="ARM + Start Auto"
+      style="edgeStyle=orthogonalEdgeStyle;
+             exitX=0.9;exitY=1;exitDx=0;exitDy=0;
+             entryX=0.5;entryY=0;entryDx=0;entryDy=0;"
+      edge="1" source="4" target="7" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         PRIORITY DECISION DIAMOND
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="10"
+      value="&lt;b&gt;PRIORITY&lt;br&gt;DECISION&lt;/b&gt;&lt;br&gt;(every ~5 ms)"
+      style="rhombus;whiteSpace=wrap;html=1;
+             fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=middle;"
+      vertex="1" parent="1">
+      <mxGeometry x="375" y="578" width="200" height="90" as="geometry" />
+    </mxCell>
+
+    <!-- Auto → Priority -->
+    <mxCell id="11"
+      style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="7" target="10" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         FORWARD NAVIGATION
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="12"
+      value="&lt;b&gt;FORWARD NAVIGATION&lt;/b&gt;&lt;br&gt;
+             Read magnetometer: HDGₙ&lt;br&gt;
+             error = HDG₀ − HDGₙ&lt;br&gt;
+             correction = Kp × error&lt;br&gt;
+             Left motor ↑ / Right motor ↓ (or vice versa)&lt;br&gt;
+             → boat steers continuously back to HDG₀"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#dae8fc;strokeColor=#6c8ebf;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="670" y="548" width="250" height="145" as="geometry" />
+    </mxCell>
+
+    <!-- Priority → Forward (exits right) -->
+    <mxCell id="13"
+      value="Normal forward"
+      style="edgeStyle=orthogonalEdgeStyle;
+             exitX=1;exitY=0.5;exitDx=0;exitDy=0;
+             entryX=0;entryY=0.5;entryDx=0;entryDy=0;"
+      edge="1" source="10" target="12" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         STUCK RECOVERY — entry node
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="14"
+      value="&lt;b&gt;STUCK RECOVERY&lt;/b&gt;"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#f8cecc;strokeColor=#b85450;"
+      vertex="1" parent="1">
+      <mxGeometry x="145" y="748" width="175" height="50" as="geometry" />
+    </mxCell>
+
+    <!-- Priority → Stuck (exits left, routes around) -->
+    <mxCell id="15"
+      value="Obstacle hit"
+      style="edgeStyle=orthogonalEdgeStyle;
+             exitX=0;exitY=0.5;exitDx=0;exitDy=0;
+             entryX=0.5;entryY=0;entryDx=0;entryDy=0;"
+      edge="1" source="10" target="14" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="232" y="623" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         WATER SAMPLING — entry node
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="16"
+      value="&lt;b&gt;WATER SAMPLING&lt;/b&gt;"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#e1d5e7;strokeColor=#9673a6;"
+      vertex="1" parent="1">
+      <mxGeometry x="375" y="748" width="200" height="50" as="geometry" />
+    </mxCell>
+
+    <!-- Priority → Sampling (exits bottom) -->
+    <mxCell id="17"
+      value="Sample interval reached"
+      style="edgeStyle=orthogonalEdgeStyle;
+             exitX=0.5;exitY=1;exitDx=0;exitDy=0;
+             entryX=0.5;entryY=0;entryDx=0;entryDy=0;"
+      edge="1" source="10" target="16" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         MISSION LOGGER (right panel)
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="18"
+      value="&lt;b&gt;MISSION LOGGER&lt;/b&gt; (parallel, non-blocking)&lt;br&gt;&lt;br&gt;
+             Every 500 ms during autonomous mode:&lt;br&gt;
+             • Read: heading, motor power, nav-state,&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;switch state, sample count, Arduino status&lt;br&gt;
+             • Write one CSV row → /log_NNN.csv&lt;br&gt;
+             • Flush to flash immediately&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;(max data loss ≤ 500 ms)&lt;br&gt;
+             • Retrieve: http://192.168.4.1/logs"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="970" y="393" width="295" height="210" as="geometry" />
+    </mxCell>
+
+    <!-- Auto → Logger (dashed) -->
+    <mxCell id="19"
+      value="records state"
+      style="edgeStyle=orthogonalEdgeStyle;dashed=1;
+             exitX=1;exitY=0.5;exitDx=0;exitDy=0;
+             entryX=0;entryY=0.5;entryDx=0;entryDy=0;"
+      edge="1" source="7" target="18" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         SEPARATOR LINE
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="20"
+      value=""
+      style="endArrow=none;startArrow=none;dashed=1;html=1;strokeColor=#999999;"
+      edge="1" parent="1">
+      <mxGeometry as="geometry">
+        <mxPoint x="30"   y="845" as="sourcePoint" />
+        <mxPoint x="1280" y="845" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- Sub-flow header labels -->
+    <mxCell id="21"
+      value="&lt;b&gt;STUCK RECOVERY — sequence detail&lt;/b&gt;"
+      style="text;html=1;strokeColor=none;fillColor=none;
+             align=left;verticalAlign=middle;whiteSpace=wrap;
+             rounded=0;fontStyle=1;fontSize=12;"
+      vertex="1" parent="1">
+      <mxGeometry x="30" y="851" width="320" height="22" as="geometry" />
+    </mxCell>
+
+    <mxCell id="22"
+      value="&lt;b&gt;WATER SAMPLING — sequence detail&lt;/b&gt;"
+      style="text;html=1;strokeColor=none;fillColor=none;
+             align=left;verticalAlign=middle;whiteSpace=wrap;
+             rounded=0;fontStyle=1;fontSize=12;"
+      vertex="1" parent="1">
+      <mxGeometry x="465" y="851" width="320" height="22" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         STUCK RECOVERY — detail box
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="23"
+      value="&lt;b&gt;1. STOP&lt;/b&gt; — brief pause (~400 ms)&lt;br&gt;
+             &lt;b&gt;2. REVERSE&lt;/b&gt; — motors reverse (~2 s); boat backs away&lt;br&gt;
+             &lt;b&gt;3. STOP&lt;/b&gt; — brief pause (~400 ms)&lt;br&gt;
+             &lt;b&gt;4. TURN&lt;/b&gt; — compass-controlled heading turn:&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;• Left switch → turn RIGHT (+30° to 90°)&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;• Right switch → turn LEFT (−30° to 90°)&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;• Front switch → turn RIGHT&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;Turn until |heading error| &lt; tolerance (or timeout)&lt;br&gt;
+             &lt;b&gt;5. STOP&lt;/b&gt; — resume forward on new heading"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#f8cecc;strokeColor=#b85450;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="30" y="881" width="425" height="200" as="geometry" />
+    </mxCell>
+
+    <!-- Stuck entry → detail -->
+    <mxCell id="24"
+      style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="14" target="23" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         STUCK PAUSE NOTE
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="25"
+      value="⚠ Sample-interval countdown PAUSES for the full stuck duration.&lt;br&gt;
+             Resumes from the same remaining value when stuck recovery exits."
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#fff2cc;strokeColor=#d6b656;"
+      vertex="1" parent="1">
+      <mxGeometry x="30" y="1098" width="425" height="60" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         WATER SAMPLING — detail box
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="26"
+      value="&lt;b&gt;1. REVERSE PHASE&lt;/b&gt;&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;Motors reverse ~7 s (kills forward momentum at sample point)&lt;br&gt;&lt;br&gt;
+             &lt;b&gt;2. SAMPLE WAIT&lt;/b&gt;&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;&lt;i&gt;Arduino present:&lt;/i&gt; send :M1 command;&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;Arduino executes: lower drum → flush hose&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;→ rotate turntable → fill bottle → retract drum;&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;replies :X1 when done&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;&lt;i&gt;No Arduino:&lt;/i&gt; self-acknowledge after configurable delay&lt;br&gt;&lt;br&gt;
+             &lt;b&gt;3. ALIGN PHASE&lt;/b&gt;&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;Closed-loop compass turn back to HDG₀&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;(boat may drift during ~136 s sample wait)&lt;br&gt;
+             &amp;nbsp;&amp;nbsp;Wait until |heading error| &lt; tolerance&lt;br&gt;&lt;br&gt;
+             &lt;b&gt;4. RESUME FORWARD&lt;/b&gt; on locked heading"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#e1d5e7;strokeColor=#9673a6;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="465" y="881" width="455" height="300" as="geometry" />
+    </mxCell>
+
+    <!-- Sampling entry → detail -->
+    <mxCell id="27"
+      style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="16" target="26" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         STOP BUTTON NOTE
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="28"
+      value="&lt;b&gt;STOP button&lt;/b&gt; (always visible in GUI top bar)
+             → Returns to STOP MODE from ANY state at ANY time"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;"
+      vertex="1" parent="1">
+      <mxGeometry x="260" y="1228" width="420" height="60" as="geometry" />
+    </mxCell>
+
+  </root>
+</mxGraphModel>

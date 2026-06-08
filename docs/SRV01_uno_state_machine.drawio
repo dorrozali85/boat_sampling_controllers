@@ -1,0 +1,536 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1"
+              connect="1" arrows="1" fold="1" page="1" pageScale="1"
+              pageWidth="1100" pageHeight="1720" math="0" shadow="0">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+
+    <!-- ═══ TITLE ═══ -->
+    <mxCell id="2"
+      value="SRV-01 AquaBot — Arduino Uno Sampling Platform State Machine"
+      style="text;html=1;strokeColor=none;fillColor=none;align=center;
+             verticalAlign=middle;whiteSpace=wrap;rounded=0;
+             fontSize=18;fontStyle=1;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="5" width="855" height="30" as="geometry" />
+    </mxCell>
+
+    <!-- ═══ LOOP() NON-BLOCKING NOTE ═══ -->
+    <mxCell id="3"
+      value="&lt;b&gt;loop() runs continuously (non-blocking):&lt;/b&gt;
+             handleSerial() → stepX() [drum] → stepY() [pump] → stepZ() [turntable] → handleSampleStateMachine()"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#f5f5f5;strokeColor=#999999;fontColor=#333333;
+             align=left;spacingLeft=10;fontSize=11;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="40" width="855" height="40" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         IDLE STATE
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="4"
+      value="&lt;b&gt;STATE_IDLE&lt;/b&gt;&lt;br&gt;
+             Awaiting command via UART (from ESP32)&lt;br&gt;
+             Accepts: :M1 (auto sample), :M2 (manual pump),&lt;br&gt;
+             :B1, :D1, :E1, :F1, :Px, parameter commands"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#ffe6cc;strokeColor=#d6b656;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="100" width="400" height="85" as="geometry" />
+    </mxCell>
+
+    <!-- ═══ DECISION DIAMOND ═══ -->
+    <!-- center=(290,255); right vertex=(450,255); bottom=(290,295) -->
+    <mxCell id="6"
+      value="&lt;b&gt;:M1 received&lt;/b&gt;&lt;br&gt;sampleCount &lt; 5 ?"
+      style="rhombus;whiteSpace=wrap;html=1;
+             fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=middle;"
+      vertex="1" parent="1">
+      <mxGeometry x="130" y="215" width="320" height="80" as="geometry" />
+    </mxCell>
+
+    <!-- IDLE → Decision -->
+    <mxCell id="e_idle_dec"
+      style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="4" target="6" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- :FULL response box (x=510 keeps it in the gap between main flow and right panel) -->
+    <mxCell id="7"
+      value="Reply &lt;b&gt;:FULL&lt;/b&gt; to ESP32&lt;br&gt;All 5 bottles filled — reject"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#f8cecc;strokeColor=#b85450;"
+      vertex="1" parent="1">
+      <mxGeometry x="510" y="228" width="185" height="55" as="geometry" />
+    </mxCell>
+
+    <!-- Decision → :FULL  (exits right of diamond, enters left of :FULL — same y=255, straight horizontal) -->
+    <mxCell id="e_dec_full"
+      value="NO (full)"
+      style="edgeStyle=orthogonalEdgeStyle;
+             exitX=1;exitY=0.5;exitDx=0;exitDy=0;
+             entryX=0;entryY=0.5;entryDx=0;entryDy=0;"
+      edge="1" source="6" target="7" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- :FULL → IDLE (dashed, loops back via y=160) -->
+    <mxCell id="e_full_idle"
+      value="→ stay IDLE"
+      style="edgeStyle=orthogonalEdgeStyle;dashed=1;
+             exitX=0.5;exitY=0;exitDx=0;exitDy=0;
+             entryX=1;entryY=0.5;entryDx=0;entryDy=0;"
+      edge="1" source="7" target="4" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="602" y="160" />
+          <mxPoint x="510" y="160" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         PHASE 1 — POSITIONING
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="lbl_pos"
+      value="▶  POSITIONING"
+      style="text;html=1;strokeColor=none;fillColor=none;
+             align=left;verticalAlign=middle;fontStyle=1;fontSize=11;fontColor=#6c8ebf;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="320" width="200" height="18" as="geometry" />
+    </mxCell>
+
+    <!-- STATE_TURN_HOME -->
+    <mxCell id="s_turn_home"
+      value="&lt;b&gt;STATE_TURN_HOME&lt;/b&gt;&lt;br&gt;
+             Issue: turntable Z → position 0 (home / waste port)&lt;br&gt;
+             → immediately transitions to STATE_DEPTH_DOWN"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#dae8fc;strokeColor=#6c8ebf;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="345" width="400" height="70" as="geometry" />
+    </mxCell>
+
+    <!-- Decision → TURN_HOME (YES, exits diamond bottom) -->
+    <mxCell id="e_dec_turn"
+      value="YES"
+      style="edgeStyle=orthogonalEdgeStyle;
+             exitX=0.5;exitY=1;exitDx=0;exitDy=0;
+             entryX=0.5;entryY=0;entryDx=0;entryDy=0;"
+      edge="1" source="6" target="s_turn_home" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- STATE_DEPTH_DOWN -->
+    <mxCell id="s_depth_down"
+      value="&lt;b&gt;STATE_DEPTH_DOWN&lt;/b&gt;&lt;br&gt;
+             Wait: turntable Z physically at home (targetZ == 0)&lt;br&gt;
+             Then issue: drum X lower to configured sample depth&lt;br&gt;
+             → transitions to STATE_WAIT_DRUM_DEPTH"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#e1d5e7;strokeColor=#9673a6;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="435" width="400" height="85" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="s_turn_home" target="s_depth_down" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- STATE_WAIT_DRUM_DEPTH -->
+    <mxCell id="s_wait_depth"
+      value="&lt;b&gt;STATE_WAIT_DRUM_DEPTH&lt;/b&gt;&lt;br&gt;
+             Wait: drum X physically at sample depth (targetX == 0)&lt;br&gt;
+             → transitions to STATE_PRE_FLUSH_SETTLE"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#e1d5e7;strokeColor=#9673a6;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="540" width="400" height="70" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="s_depth_down" target="s_wait_depth" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══ SEPARATOR 1 ═══ -->
+    <mxCell id="sep1" value=""
+      style="endArrow=none;startArrow=none;dashed=1;html=1;strokeColor=#999999;"
+      edge="1" parent="1">
+      <mxGeometry as="geometry">
+        <mxPoint x="90"  y="628" as="sourcePoint" />
+        <mxPoint x="500" y="628" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         PHASE 2 — FLUSH
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="lbl_flush"
+      value="▶  FLUSH PHASE"
+      style="text;html=1;strokeColor=none;fillColor=none;
+             align=left;verticalAlign=middle;fontStyle=1;fontSize=11;fontColor=#82b366;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="630" width="200" height="18" as="geometry" />
+    </mxCell>
+
+    <!-- STATE_PRE_FLUSH_SETTLE -->
+    <mxCell id="s_pre_flush"
+      value="&lt;b&gt;STATE_PRE_FLUSH_SETTLE&lt;/b&gt;&lt;br&gt;
+             Wait: 5 s settle (water inflow stabilizes at depth)&lt;br&gt;
+             → transitions to STATE_FLUSH"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#d5e8d4;strokeColor=#82b366;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="652" width="400" height="70" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="s_wait_depth" target="s_pre_flush" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- STATE_FLUSH -->
+    <mxCell id="s_flush"
+      value="&lt;b&gt;STATE_FLUSH&lt;/b&gt;&lt;br&gt;
+             Run pump (flush mode) for configured flush time&lt;br&gt;
+             Soft-start ramp; discharges to waste port (pos 0)&lt;br&gt;
+             Wait: pump timer expires (pumpRunning → false)&lt;br&gt;
+             → transitions to STATE_POST_FLUSH_SETTLE"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#dae8fc;strokeColor=#6c8ebf;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="742" width="400" height="90" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="s_pre_flush" target="s_flush" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- STATE_POST_FLUSH_SETTLE -->
+    <mxCell id="s_post_flush"
+      value="&lt;b&gt;STATE_POST_FLUSH_SETTLE&lt;/b&gt;&lt;br&gt;
+             Wait: 5 s settle&lt;br&gt;
+             Then issue: turntable Z → next bottle (sampleCount + 1)&lt;br&gt;
+             → transitions to STATE_TURN_NEXT"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#d5e8d4;strokeColor=#82b366;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="852" width="400" height="85" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="s_flush" target="s_post_flush" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══ SEPARATOR 2 ═══ -->
+    <mxCell id="sep2" value=""
+      style="endArrow=none;startArrow=none;dashed=1;html=1;strokeColor=#999999;"
+      edge="1" parent="1">
+      <mxGeometry as="geometry">
+        <mxPoint x="90"  y="957" as="sourcePoint" />
+        <mxPoint x="500" y="957" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         PHASE 3 — FILL
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="lbl_fill"
+      value="▶  FILL PHASE"
+      style="text;html=1;strokeColor=none;fillColor=none;
+             align=left;verticalAlign=middle;fontStyle=1;fontSize=11;fontColor=#9673a6;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="959" width="200" height="18" as="geometry" />
+    </mxCell>
+
+    <!-- STATE_TURN_NEXT -->
+    <mxCell id="s_turn_next"
+      value="&lt;b&gt;STATE_TURN_NEXT&lt;/b&gt;&lt;br&gt;
+             Wait: turntable Z physically at bottle N (targetZ == 0)&lt;br&gt;
+             → transitions to STATE_PRE_SAMPLE_SETTLE"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#e1d5e7;strokeColor=#9673a6;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="982" width="400" height="70" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="s_post_flush" target="s_turn_next" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- STATE_PRE_SAMPLE_SETTLE -->
+    <mxCell id="s_pre_sample"
+      value="&lt;b&gt;STATE_PRE_SAMPLE_SETTLE&lt;/b&gt;&lt;br&gt;
+             Wait: 5 s settle (hose positioned over bottle inlet)&lt;br&gt;
+             → transitions to STATE_REAL_SAMPLE"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#d5e8d4;strokeColor=#82b366;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="1072" width="400" height="70" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="s_turn_next" target="s_pre_sample" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- STATE_REAL_SAMPLE -->
+    <mxCell id="s_real_sample"
+      value="&lt;b&gt;STATE_REAL_SAMPLE&lt;/b&gt;&lt;br&gt;
+             Run pump (fill mode) for configured fill time&lt;br&gt;
+             Soft-start ramp; fills bottle N&lt;br&gt;
+             Wait: pump timer expires (pumpRunning → false)&lt;br&gt;
+             → transitions to STATE_POST_SAMPLE_SETTLE"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#dae8fc;strokeColor=#6c8ebf;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="1162" width="400" height="90" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="s_pre_sample" target="s_real_sample" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- STATE_POST_SAMPLE_SETTLE -->
+    <mxCell id="s_post_sample"
+      value="&lt;b&gt;STATE_POST_SAMPLE_SETTLE&lt;/b&gt;&lt;br&gt;
+             Wait: 5 s settle&lt;br&gt;
+             sampleCount++ (bottle N now filled)&lt;br&gt;
+             Issue: turntable Z → position 0 (home)&lt;br&gt;
+             → transitions to STATE_TURN_HOME_FINAL"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#d5e8d4;strokeColor=#82b366;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="1272" width="400" height="90" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="s_real_sample" target="s_post_sample" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══ SEPARATOR 3 ═══ -->
+    <mxCell id="sep3" value=""
+      style="endArrow=none;startArrow=none;dashed=1;html=1;strokeColor=#999999;"
+      edge="1" parent="1">
+      <mxGeometry as="geometry">
+        <mxPoint x="90"  y="1382" as="sourcePoint" />
+        <mxPoint x="500" y="1382" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         PHASE 4 — RETURN
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="lbl_ret"
+      value="▶  RETURN PHASE"
+      style="text;html=1;strokeColor=none;fillColor=none;
+             align=left;verticalAlign=middle;fontStyle=1;fontSize=11;fontColor=#b85450;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="1384" width="200" height="18" as="geometry" />
+    </mxCell>
+
+    <!-- STATE_TURN_HOME_FINAL -->
+    <mxCell id="s_turn_home_final"
+      value="&lt;b&gt;STATE_TURN_HOME_FINAL&lt;/b&gt;&lt;br&gt;
+             Wait: turntable Z physically at home (targetZ == 0)&lt;br&gt;
+             Then issue: drum X retract fully to zero&lt;br&gt;
+             → transitions to STATE_WAIT_DRUM_HOME"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#e1d5e7;strokeColor=#9673a6;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="1407" width="400" height="85" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="s_post_sample" target="s_turn_home_final" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- STATE_WAIT_DRUM_HOME -->
+    <mxCell id="s_wait_home"
+      value="&lt;b&gt;STATE_WAIT_DRUM_HOME&lt;/b&gt;&lt;br&gt;
+             Wait: drum X physically fully retracted (targetX == 0)&lt;br&gt;
+             → transitions to STATE_IDLE"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#e1d5e7;strokeColor=#9673a6;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="1512" width="400" height="70" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="s_turn_home_final" target="s_wait_home" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══ CYCLE COMPLETE / :X1 ═══ -->
+    <mxCell id="s_x1"
+      value="Send &lt;b&gt;:X1&lt;/b&gt; to ESP32 — cycle complete → STATE_IDLE"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;fontStyle=1;"
+      vertex="1" parent="1">
+      <mxGeometry x="90" y="1602" width="400" height="55" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;"
+      edge="1" source="s_wait_home" target="s_x1" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- :X1 → IDLE loop-back (left side, x=40) -->
+    <mxCell id="e_loop"
+      value="→ STATE_IDLE"
+      style="edgeStyle=orthogonalEdgeStyle;
+             exitX=0;exitY=0.5;exitDx=0;exitDy=0;
+             entryX=0;entryY=0.5;entryDx=0;entryDy=0;"
+      edge="1" source="s_x1" target="4" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="40" y="1629" />
+          <mxPoint x="40" y="142"  />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════
+         RIGHT PANEL — SERIAL COMMANDS
+    ═══════════════════════════════════════════════════════ -->
+    <mxCell id="r_cmds"
+      value="&lt;b&gt;SERIAL COMMANDS (UART from ESP32)&lt;/b&gt;&lt;br&gt;&lt;br&gt;
+             &lt;b&gt;Auto sample:&lt;/b&gt;&lt;br&gt;
+             :M1 → start auto sample cycle&lt;br&gt;
+             :M2 → start manual pump (continuous)&lt;br&gt;&lt;br&gt;
+             &lt;b&gt;Manual positioning:&lt;/b&gt;&lt;br&gt;
+             :B1 → retract drum to zero&lt;br&gt;
+             :D1 → lower drum to sample depth&lt;br&gt;
+             :E1 → lower drum 90°&lt;br&gt;
+             :F1 → raise drum 90°&lt;br&gt;
+             :Px → turntable to position x (0–5)&lt;br&gt;&lt;br&gt;
+             &lt;b&gt;Runtime parameters (any time):&lt;/b&gt;&lt;br&gt;
+             :SDx.x → set sample depth (0.0–2.0 m)&lt;br&gt;
+             :FTxx → set flush time (0–60 s)&lt;br&gt;
+             :BTxx → set fill time (0–60 s)&lt;br&gt;&lt;br&gt;
+             &lt;b&gt;Emergency:&lt;/b&gt;&lt;br&gt;
+             :C1 → stop all motion, reset to STATE_IDLE"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="700" y="100" width="320" height="385" as="geometry" />
+    </mxCell>
+
+    <!-- ═══ RIGHT PANEL — HARDWARE AXES ═══ -->
+    <mxCell id="r_hw"
+      value="&lt;b&gt;HARDWARE AXES (CNC Shield v3.0 — 1/16 microstepping)&lt;/b&gt;&lt;br&gt;&lt;br&gt;
+             &lt;b&gt;X-axis — Drum (depth stepper)&lt;/b&gt;&lt;br&gt;
+             NEMA17, 3200 steps/rev&lt;br&gt;
+             Positive steps = down, Negative = up&lt;br&gt;
+             ~0.1 m per revolution (~27825 steps/m)&lt;br&gt;&lt;br&gt;
+             &lt;b&gt;Y-axis — Pump (peristaltic)&lt;/b&gt;&lt;br&gt;
+             800 steps/rev, one direction only&lt;br&gt;
+             Soft-start ramp: 300 µs → 80 µs step delay&lt;br&gt;&lt;br&gt;
+             &lt;b&gt;Z-axis — Turntable (carousel)&lt;/b&gt;&lt;br&gt;
+             3200 steps/rev, 6 positions × 60°&lt;br&gt;
+             Position 0 = home / waste port&lt;br&gt;
+             Positions 1–5 = sample bottles"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#dae8fc;strokeColor=#6c8ebf;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="700" y="505" width="320" height="285" as="geometry" />
+    </mxCell>
+
+    <!-- ═══ RIGHT PANEL — EMERGENCY STOP ═══ -->
+    <mxCell id="r_estop"
+      value="&lt;b&gt;:C1 EMERGENCY STOP&lt;/b&gt;&lt;br&gt;
+             Pump off; all steppers halted&lt;br&gt;
+             (targetX = targetY = targetZ = 0)&lt;br&gt;
+             sampleCount preserved&lt;br&gt;
+             → STATE_IDLE immediately from any state"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#f8cecc;strokeColor=#b85450;
+             align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;"
+      vertex="1" parent="1">
+      <mxGeometry x="700" y="810" width="320" height="95" as="geometry" />
+    </mxCell>
+
+    <!-- Emergency stop → IDLE (dashed, routes through gap at x=600) -->
+    <mxCell id="e_estop"
+      value="any state → IDLE"
+      style="edgeStyle=orthogonalEdgeStyle;dashed=1;
+             exitX=0;exitY=0.5;exitDx=0;exitDy=0;
+             entryX=1;entryY=0.5;entryDx=0;entryDy=0;"
+      edge="1" source="r_estop" target="4" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="600" y="857" />
+          <mxPoint x="600" y="142" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+
+    <!-- ═══ RIGHT PANEL — LEGEND ═══ -->
+    <mxCell id="lbl_legend"
+      value="&lt;b&gt;STATE COLOUR LEGEND&lt;/b&gt;"
+      style="text;html=1;strokeColor=none;fillColor=none;
+             align=left;fontStyle=1;fontSize=11;"
+      vertex="1" parent="1">
+      <mxGeometry x="700" y="925" width="220" height="20" as="geometry" />
+    </mxCell>
+
+    <mxCell id="leg1"
+      value="Action state — stepper command issued"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="700" y="950" width="270" height="30" as="geometry" />
+    </mxCell>
+
+    <mxCell id="leg2"
+      value="Hardware wait — poll targetX or targetZ == 0"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="700" y="990" width="270" height="30" as="geometry" />
+    </mxCell>
+
+    <mxCell id="leg3"
+      value="Timer settle — fixed 5 s delay"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="700" y="1030" width="270" height="30" as="geometry" />
+    </mxCell>
+
+    <mxCell id="leg4"
+      value="IDLE / decision"
+      style="rounded=1;whiteSpace=wrap;html=1;
+             fillColor=#ffe6cc;strokeColor=#d6b656;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="700" y="1070" width="270" height="30" as="geometry" />
+    </mxCell>
+
+  </root>
+</mxGraphModel>
