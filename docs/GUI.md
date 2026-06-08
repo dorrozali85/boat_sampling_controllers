@@ -68,6 +68,7 @@ Polls every 500ms. Displays:
 |---|---|
 | Mode | ESP32 mode: STOP / MANUAL / AUTONOMOUS |
 | Heading | HMC5883L compass reading (degrees) |
+| Target | Locked target heading the boat is closed-loop tracking (degrees) |
 | Left Motor | Last left motor power value |
 | Right Motor | Last right motor power value |
 | ESP32 State | Navigation sub-state (FORWARD, WATER SAMPLE, TURN LEFT, etc.) |
@@ -99,7 +100,10 @@ All parameters are saved to browser `localStorage` and restored on page load.
 | Button | Function |
 |---|---|
 | **Start Auto Mode** | Sends `T`, starts elapsed and countdown timers |
-| **Trigger Stuck** | Sends `C`, manually triggers stuck recovery sequence |
+| **Stuck Left** | Sends `CL` — manually triggers stuck recovery turning the boat LEFT (CCW) by a random angle in `[min_turn_angle, max_turn_angle]` |
+| **Stuck Right** | Sends `CR` — manually triggers stuck recovery turning the boat RIGHT (CW) |
+
+The single ambiguous `Trigger Stuck` button (`C` command) has been replaced by these two explicit-direction buttons so the operator can deliberately steer the boat away from a known obstacle.
 
 ### Mission Timers Card
 
@@ -114,12 +118,12 @@ Dark-themed card with two live timers:
 - Counts down from the set sample interval
 - Pauses and shows `SAMPLING` / Water collection when `arduinoState` enters active sampling states
 - Resets to full interval when `arduinoState` becomes `'Sample Done'`
-- Continues counting during stuck manoeuvres (matches ESP32 C++ behaviour — the real timer never pauses for stuck)
+- Effectively pauses during stuck recovery — the ESP32 firmware shifts `sampleStart` forward by the stuck duration on stuck exit, so the GUI countdown freezes for the duration of the stuck event and resumes from the same value (prevents stuck-then-immediately-sample chains)
 - Shows `--:--` when autonomous mode is not running
 
 ### Telemetry Card
 
-Same fields as Manual tab telemetry.
+Same fields as Manual tab telemetry (including Target heading).
 
 ---
 
@@ -150,12 +154,38 @@ Two-column layout (on wide screens). All parameters use `+` / `-` adjust buttons
 | Parameter | ID | Command | Range | Default |
 |---|---|---|---|---|
 | Debounce | `debounce` | `E:` | 0–50ms | 30 |
-| Min Turn | `minTurn` | `N:` | 0–10000ms | 3000 |
-| Max Turn | `maxTurn` | `W:` | 0–10000ms | 6000 |
+| Min Turn Angle | `minTurn` | `MA:` | 5–180° | 30 |
+| Max Turn Angle | `maxTurn` | `XA:` | 5–180° | 90 |
 | Fwd Lock | `forwardLock` | `F:` | 0–10000ms | 2000 |
 | Sample Interval | `sampleIntervalParams` | `Y:` | 1–60 min | 3 |
 
+Min/Max Turn Angle replaced the former Min Turn (`N:`, ms) and Max Turn (`W:`, ms) parameters. localStorage keys are `MA` and `XA` (not `N`/`W`).
+
 Sample Interval is synced bidirectionally with the Autonomous tab input.
+
+### Heading Control
+
+| Parameter | ID | Command | Range | Default |
+|---|---|---|---|---|
+| Turn Tolerance | `turnTolerance` | `TT:` | 1–30° | 5.0 |
+| Heading Kp | `headingKp` | `KP:` | 0.1–10 | 1.5 |
+| Turn Timeout | `turnTimeout` | `TM:` | 1–30s | 8 |
+
+- **Turn Tolerance**: How close (in degrees) the boat must be to the new target heading before the stuck turn is considered complete.
+- **Heading Kp**: Proportional gain for the P-controller that biases left/right motor power during forward motion to hold the locked heading.
+- **Turn Timeout**: Maximum time (seconds) allowed for a compass-controlled stuck turn before the boat gives up and resumes forward anyway.
+
+### Water Sampler
+
+| Parameter | ID | Command | Range | Default |
+|---|---|---|---|---|
+| Sampler On Board | `wsOn`/`wsOff` | `WS:` | 0 or 1 | ON (1) |
+| Self-Ack Delay (s) | `sstDelay` | `SST:` | 1–120s | 10 |
+| Reverse Duration (s) | `rsdDelay` | `RSD:` | 0–30s | 7 |
+
+- **Sampler On Board**: Toggle ON/OFF buttons. ON (green) = ESP32 communicates with Arduino Uno. OFF (red) = autonomous missions run without Uno; sample completion is self-acknowledged.
+- **Self-Ack Delay**: Only active when Sampler On Board is OFF. Time (seconds) the ESP32 waits before simulating a `:X1` completion signal.
+- **Reverse Duration**: At every autonomous sample trigger (both real and simulated paths), the boat reverses for this many seconds to kill forward momentum before the sample wait.
 
 ---
 
@@ -186,6 +216,7 @@ Sample Interval is synced bidirectionally with the Autonomous tab input.
 | `startTimers()` | Initialises and starts elapsed + countdown timers |
 | `stopTimers()` | Accumulates elapsed, clears `timerTick` |
 | `loadParams()` | Restores all `localStorage` values to input fields on page load |
+| `toggleSampler(on)` | Sends `WS:1` or `WS:0`, saves to localStorage, updates ON/OFF button highlight |
 
 ### Parameter Persistence (localStorage keys)
 
@@ -196,9 +227,47 @@ Sample Interval is synced bidirectionally with the Autonomous tab input.
 | `P` | Turn Power |
 | `X` | Motor Offset |
 | `K`, `D`, `B`, `O` | Stuck recovery times |
-| `E`, `N`, `W`, `F` | Navigation timing |
+| `E`, `F` | Navigation timing (debounce, forward lock) |
+| `MA`, `XA` | Min / Max turn angle (degrees) — replaces former `N`/`W` ms keys |
+| `TT`, `KP`, `TM` | Heading control (tolerance, Kp, timeout) |
 | `Y` | Sample interval |
 | `FT` | Flush time |
 | `BT` | Fill time |
 | `NS` | No. of samples |
 | `SD` | Sample depth |
+| `WS` | Sampler On Board (0 or 1) |
+| `SST` | Self-Ack Delay (s) |
+| `RSD` | Reverse Duration (s) |
+
+### TARGET Field Parsing
+
+`refresh()` parses the `TARGET:` line from `/status` and updates a `p+'-target'` DOM element in both telemetry cards. This shows the locked compass heading the boat is closed-loop tracking (0–360°).
+
+---
+
+## Mission Logs (LittleFS)
+
+The ESP32 records the full boat state at 2 Hz to internal flash for every autonomous mission. The main control UI is unchanged; logs are accessed via a separate URL.
+
+### Access
+
+Navigate manually from a connected device (phone, tablet, laptop) to:
+
+```
+http://192.168.4.1/logs
+```
+
+The page lists every `log_NNN.csv` file currently on LittleFS with its size in bytes and a direct download link. Used/total bytes of the LittleFS partition are shown at the top.
+
+### Workflow
+
+1. Run a mission (autonomous mode entry → autonomous mode exit). A new `log_NNN.csv` is created automatically and written to throughout the mission. Filename increments persistently across reboots.
+2. After returning to shore, while still connected to the boat's WiFi AP (`ESP32_Robot_HTML`), open `/logs` in the browser.
+3. Tap a filename — the file streams as `text/csv` and the browser saves it to the device's Downloads folder.
+4. Open in Excel / Google Sheets / Python / MATLAB for analysis. 14 columns; see ESP32_MASTER.md → Mission Logging for the schema.
+
+### Notes
+
+- There is **no button on the Manual / Autonomous / Parameters tabs** for the log index — it is a direct URL. This is intentional to keep the operator UI uncluttered.
+- The logger is fully transparent to the main GUI — none of the telemetry polling, parameter sets, or mode controls are affected by it.
+- LittleFS is finite (~1.5 MB on a standard ESP32 module). A typical 5-minute mission at 2 Hz produces ~50 KB. After many missions the operator may want to manually delete old logs (no delete UI provided — flash a new firmware build or use ESP32 file-system tools).

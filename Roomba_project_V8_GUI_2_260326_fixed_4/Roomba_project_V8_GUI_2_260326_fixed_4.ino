@@ -8,6 +8,7 @@
 #include <Adafruit_HMC5883_U.h>
 #include <ESP32Servo.h>
 #include <WebServer.h>
+#include <LittleFS.h>
 #define RXD2 16  // RX to Arduino TX (via divider)
 #define TXD2 17  // TX to Arduino RX
 
@@ -35,10 +36,24 @@ unsigned long lastFwdPrint = 0;
 
 // New tunable parameters
 unsigned long debounce_ms = 30;        // Debounce time (ms)
-unsigned long min_turn_ms = 3000;      // Min turn time (ms)
-unsigned long max_turn_ms = 6000;      // Max turn time (ms)
 unsigned long forward_lock_ms = 2000;  // Forward lock time (ms)
 unsigned long sample_interval_ms = 60000; // Sample interval (ms, default 1 min)
+
+// -------------------- Magnetometer Heading Navigation --------------------
+unsigned long min_turn_angle = 30;        // Min random turn angle (degrees) — GUI: MA:
+unsigned long max_turn_angle = 90;        // Max random turn angle (degrees) — GUI: XA:
+float turn_tolerance_deg = 5.0;           // Tolerance for turn complete (degrees) — GUI: TT:
+float heading_kp = 1.5;                   // Closed-loop forward P-gain — GUI: KP:
+unsigned long turn_timeout_ms = 8000;     // Abort turn-to-heading timeout (ms) — GUI: TM: (in seconds)
+float targetHeading = 0;                  // Current commanded heading (0–360°)
+float currentHeading = 0;                 // Latest magnetometer reading (0–360°)
+
+// -------------------- Stuck-Recovery Sample-Timer Pause --------------------
+unsigned long stuckPauseStart = 0;        // millis() at stuck recovery entry; on exit shifts sampleStart by elapsed
+
+// -------------------- Post-Sample Heading Alignment --------------------
+bool aligningAfterSample = false;         // true = boat is realigning to targetHeading after a sample completes
+unsigned long alignStart = 0;             // millis() at align start; for turn_timeout_ms abort
 
 // -------------------- Sampling Platform Parameters (relayed to Arduino) --------------------
 float    sample_depth_m  = 2.0;    // Sample depth (metres, 0–2)
@@ -51,6 +66,24 @@ unsigned long skipSampleDelay = 10000; // Simulated sample hold time (ms, defaul
 unsigned long skipSampleStart = 0;     // Internal: timestamp for non-blocking skip
 unsigned long reverse_after_sample_duration = 7; // Reverse-motor duration at sample start in SECONDS (GUI: RSD:)
 bool sampleReverseHandled = false;     // Internal: tracks reverse phase for non-blocking skip path
+
+// -------------------- CSV Mission Logger (LittleFS) --------------------
+// Records full boat state to /log_NNN.csv at 2 Hz for the duration of each
+// autonomous mission. Sequence number persists in /log_counter.txt so
+// filenames never collide across reboots.
+File          logFile;                                 // file handle stays open for whole mission
+bool          loggerFsReady = false;                   // true if LittleFS.begin() succeeded at boot
+bool          loggerActive = false;                    // true between autonomous start and stop
+unsigned long autoStartMs  = 0;                        // millis() at autonomous mode entry — drives Runtime_sec
+unsigned long lastLogMs    = 0;                        // last row timestamp — drives 500 ms rate gate
+String        logBuffer    = "";                       // batches up to LOG_FLUSH_BYTES of CSV before file.print()
+uint32_t      logSeqNum    = 0;                        // current/last log file number
+const size_t  LOG_FLUSH_BYTES   = 512;                 // ~6 rows
+const char*   LOG_COUNTER_PATH  = "/log_counter.txt";  // single int — persistent log sequence number
+const char*   LOG_CSV_HEADER    =
+    "Timestamp_ms,Runtime_sec,Mode,NavState,Stuck,SwitchHit,SampleCount,"
+    "ArduinoState,TargetHeading,ActualHeading,HeadingError,LeftPower,"
+    "RightPower,SampleIntervalRemaining_ms";
 
 // -------------------- PWM Channels --------------------
 const int pwmPinA = 4;         // Servo pin for left motor
@@ -79,7 +112,7 @@ int stuckStep = 0;
 // -------------------- Status Variables --------------------
 int lastLeft = 0;
 int lastRight = 0;
-float lastHeading = 0;
+// (lastHeading replaced by currentHeading in heading-nav section)
 
 // -------------------- Forward Declarations --------------------
 void stopCar();
@@ -88,6 +121,9 @@ void moveForwardAutonomous();
 void moveBackward();
 void turnLeft();
 void turnRight();
+void readHeading();
+float headingError(float target, float current);
+void computeStuckTurnTarget(int switchHit);
 
 // -------------------- HTML Content --------------------
 const char* html = R"rawliteral(
@@ -373,6 +409,7 @@ canvas{border-radius:50%;border:2px solid var(--border2);background:var(--surfac
         <div class="stat-grid">
           <div class="stat-cell"><div class="stat-lbl">Mode</div><div class="stat-val" id="manual-mode">--</div></div>
           <div class="stat-cell"><div class="stat-lbl">Heading</div><div class="stat-val amber" id="manual-angle">0&deg;</div></div>
+          <div class="stat-cell"><div class="stat-lbl">Target</div><div class="stat-val amber" id="manual-target">--</div></div>
           <div class="stat-cell"><div class="stat-lbl">Left Motor</div><div class="stat-val" id="manual-left">0</div></div>
           <div class="stat-cell"><div class="stat-lbl">Right Motor</div><div class="stat-val" id="manual-right">0</div></div>
           <div class="stat-cell"><div class="stat-lbl">ESP32 State</div><div class="stat-val" id="manual-state">N/A</div></div>
@@ -457,7 +494,8 @@ canvas{border-radius:50%;border:2px solid var(--border2);background:var(--surfac
 
       <div class="auto-btns">
         <button class="abtn-auto" onclick="startAuto()">&#9654;&ensp;Start Auto Mode</button>
-        <button class="abtn-stuck" onclick="sendCommand('C')">&#9888;&ensp;Trigger Stuck</button>
+        <button class="abtn-stuck" onclick="sendCommand('CL')">&#11013;&ensp;Stuck Left</button>
+        <button class="abtn-stuck" onclick="sendCommand('CR')">Stuck Right&ensp;&#10145;</button>
       </div>
 
     </div>
@@ -487,6 +525,7 @@ canvas{border-radius:50%;border:2px solid var(--border2);background:var(--surfac
         <div class="stat-grid">
           <div class="stat-cell"><div class="stat-lbl">Mode</div><div class="stat-val" id="auto-mode">--</div></div>
           <div class="stat-cell"><div class="stat-lbl">Heading</div><div class="stat-val amber" id="auto-angle">0&deg;</div></div>
+          <div class="stat-cell"><div class="stat-lbl">Target</div><div class="stat-val amber" id="auto-target">--</div></div>
           <div class="stat-cell"><div class="stat-lbl">Left Motor</div><div class="stat-val" id="auto-left">0</div></div>
           <div class="stat-cell"><div class="stat-lbl">Right Motor</div><div class="stat-val" id="auto-right">0</div></div>
           <div class="stat-cell"><div class="stat-lbl">ESP32 State</div><div class="stat-val" id="auto-state">N/A</div></div>
@@ -519,9 +558,14 @@ canvas{border-radius:50%;border:2px solid var(--border2);background:var(--surfac
     <div>
       <div class="sec-label">Navigation Timing</div>
       <div class="param-row"><span class="pname">Debounce (ms)</span><button class="padj" onclick="updateParam('debounce',-1)">-</button><input class="pinp" type="number" id="debounce" min="0" max="50" value="30"><button class="padj" onclick="updateParam('debounce',1)">+</button><button class="pset" onclick="setParam('E',document.getElementById('debounce').value)">Set</button></div>
-      <div class="param-row"><span class="pname">Min Turn (ms)</span><button class="padj" onclick="updateParam('minTurn',-100)">-</button><input class="pinp" type="number" id="minTurn" min="0" max="10000" value="3000"><button class="padj" onclick="updateParam('minTurn',100)">+</button><button class="pset" onclick="setParam('N',document.getElementById('minTurn').value)">Set</button></div>
-      <div class="param-row"><span class="pname">Max Turn (ms)</span><button class="padj" onclick="updateParam('maxTurn',-100)">-</button><input class="pinp" type="number" id="maxTurn" min="0" max="10000" value="6000"><button class="padj" onclick="updateParam('maxTurn',100)">+</button><button class="pset" onclick="setParam('W',document.getElementById('maxTurn').value)">Set</button></div>
+      <div class="param-row"><span class="pname">Min Turn Angle (&deg;)</span><button class="padj" onclick="updateParam('minTurnAngle',-5)">-</button><input class="pinp" type="number" id="minTurnAngle" min="5" max="180" value="30"><button class="padj" onclick="updateParam('minTurnAngle',5)">+</button><button class="pset" onclick="setParam('MA',document.getElementById('minTurnAngle').value)">Set</button></div>
+      <div class="param-row"><span class="pname">Max Turn Angle (&deg;)</span><button class="padj" onclick="updateParam('maxTurnAngle',-5)">-</button><input class="pinp" type="number" id="maxTurnAngle" min="5" max="180" value="90"><button class="padj" onclick="updateParam('maxTurnAngle',5)">+</button><button class="pset" onclick="setParam('XA',document.getElementById('maxTurnAngle').value)">Set</button></div>
       <div class="param-row"><span class="pname">Fwd Lock (ms)</span><button class="padj" onclick="updateParam('forwardLock',-100)">-</button><input class="pinp" type="number" id="forwardLock" min="0" max="10000" value="2000"><button class="padj" onclick="updateParam('forwardLock',100)">+</button><button class="pset" onclick="setParam('F',document.getElementById('forwardLock').value)">Set</button></div>
+
+      <div class="sec-label">Heading Control</div>
+      <div class="param-row"><span class="pname">Tolerance (&deg;)</span><button class="padj" onclick="updateParam('headingTol',-1)">-</button><input class="pinp" type="number" id="headingTol" min="1" max="30" value="5"><button class="padj" onclick="updateParam('headingTol',1)">+</button><button class="pset" onclick="setParam('TT',document.getElementById('headingTol').value)">Set</button></div>
+      <div class="param-row"><span class="pname">Kp Gain</span><button class="padj" onclick="updateParam('headingKp',-0.1)">-</button><input class="pinp" type="number" id="headingKp" min="0.1" max="10" step="0.1" value="1.5"><button class="padj" onclick="updateParam('headingKp',0.1)">+</button><button class="pset" onclick="setParam('KP',document.getElementById('headingKp').value)">Set</button></div>
+      <div class="param-row"><span class="pname">Turn Timeout (s)</span><button class="padj" onclick="updateParam('turnTimeout',-1)">-</button><input class="pinp" type="number" id="turnTimeout" min="1" max="30" value="8"><button class="padj" onclick="updateParam('turnTimeout',1)">+</button><button class="pset" onclick="setParam('TM',document.getElementById('turnTimeout').value)">Set</button></div>
 
       <div class="sec-label">Sampling</div>
       <div class="param-row">
@@ -680,12 +724,13 @@ function handleArduinoStateTransition(newState) {
 }
 
 function parseResponse(text) {
-  const d = {mode:'--',left:0,right:0,angle:0,stuck:false,state:'N/A',switch_hit:'--',arduino_state:'Ready',sample_count:0};
+  const d = {mode:'--',left:0,right:0,angle:0,target:0,stuck:false,state:'N/A',switch_hit:'--',arduino_state:'Ready',sample_count:0};
   text.split('\n').forEach(l => {
     if (l.includes('MODE:'))         d.mode          = l.split('MODE:')[1].trim();
     if (l.includes('LEFT:'))         d.left          = parseInt(l.split('LEFT:')[1].trim()) || 0;
     if (l.includes('RIGHT:'))        d.right         = parseInt(l.split('RIGHT:')[1].trim()) || 0;
     if (l.includes('ANGLE:'))        d.angle         = parseInt(l.split('ANGLE:')[1].trim()) || 0;
+    if (l.includes('TARGET:'))       d.target        = parseInt(l.split('TARGET:')[1].trim()) || 0;
     if (l.includes('STUCK:'))        d.stuck         = l.split('STUCK:')[1].trim().toLowerCase() === 'true';
     if (l.includes('STATE:'))        d.state         = l.split('STATE:')[1].trim();
     if (l.includes('SWITCH_HIT:'))   d.switch_hit    = l.split('SWITCH_HIT:')[1].trim();
@@ -703,6 +748,7 @@ function refresh() {
     document.getElementById(p + '-left').innerText          = d.left;
     document.getElementById(p + '-right').innerText         = d.right;
     document.getElementById(p + '-angle').innerText         = d.angle + '\u00b0';
+    document.getElementById(p + '-target').innerText        = d.target + '\u00b0';
     const se = document.getElementById(p + '-stuck');
     se.innerText   = d.stuck ? 'YES' : 'NO';
     se.className   = 'stat-val' + (d.stuck ? ' red' : '');
@@ -768,8 +814,9 @@ function loadParams() {
   const m = {
     motorPower:'S', reversePower:'R', turnPower:'P', motorOffset:'X',
     stuckStop1:'K', stuckReverse:'D', stuckStop2:'B', stuckFinal:'O',
-    debounce:'E', minTurn:'N', maxTurn:'W', forwardLock:'F', sampleIntervalParams:'Y',
-    flushTime:'FT', fillTime:'BT'
+    debounce:'E', minTurnAngle:'MA', maxTurnAngle:'XA', forwardLock:'F', sampleIntervalParams:'Y',
+    flushTime:'FT', fillTime:'BT',
+    headingTol:'TT', headingKp:'KP', turnTimeout:'TM'
   };
   Object.entries(m).forEach(([id, k]) => {
     const s = localStorage.getItem(k);
@@ -881,9 +928,7 @@ unsigned long forwardLockStart = 0;
 // -------------------- Debounce --------------------
 unsigned long lastDebounceTime = 0;
 
-// -------------------- Turn Vars --------------------
-unsigned long currentTurnDuration = 0;
-char turnDirection = ' '; // 'L' left, 'R' right
+// -------------------- Turn Vars (replaced by heading-nav, see top of file) --------------------
 
 // -------------------- Sampling Vars --------------------
 unsigned long sampleStart = 0;
@@ -982,6 +1027,8 @@ void performAutoSample() {
         sample_count++;
         sampleStart = millis();
         sampling = false;
+        aligningAfterSample = true;     // Realign to targetHeading before resuming forward
+        alignStart = millis();
     } else {
         if (stopMode) {
              Serial.println("Sampling Aborted by User (STOP).");
@@ -1002,6 +1049,7 @@ void handleStuckNonBlocking() {
         Serial.println("Stuck stopping");
         stopCar();
         stuckStart = now;
+        stuckPauseStart = now;          // Pause sample-interval clock for full stuck duration
         stuckStep = 1;
     } else if (stuckStep == 1 && now - stuckStart >= STUCK_STOP_TIME_1) {
         Serial.println("Stuck reversing");
@@ -1014,24 +1062,36 @@ void handleStuckNonBlocking() {
         stuckStart = now;
         stuckStep = 3;
     } else if (stuckStep == 3 && now - stuckStart >= STUCK_STOP_TIME_2) {
-        currentTurnDuration = random(min_turn_ms, max_turn_ms + 1);
-        Serial.print("Stuck turning ");
-        Serial.print(turnDirection == 'L' ? "left" : "right");
-        Serial.print(" for ");
-        Serial.print(currentTurnDuration);
-        Serial.println("ms");
-        if (turnDirection == 'L') turnLeft();
-        else turnRight();
+        Serial.println("Stuck turning to heading " + String(targetHeading, 1) + "°");
         stuckStart = now;
         stuckStep = 4;
-    } else if (stuckStep == 4 && now - stuckStart >= currentTurnDuration) {
-        stopCar();
-        stuckStart = now;
-        stuckStep = 5;
+    } else if (stuckStep == 4) {
+        // Heading-controlled turn (closed-loop on magnetometer)
+        readHeading();
+        float err = headingError(targetHeading, currentHeading);
+        bool reached  = fabs(err) < turn_tolerance_deg;
+        bool timedOut = (now - stuckStart) >= turn_timeout_ms;
+        if (reached || timedOut) {
+            stopCar();
+            stuckStart = now;
+            stuckStep = 5;
+            Serial.println(reached ? "Heading reached" : "Turn TIMEOUT");
+            Serial.println("  err=" + String(err, 1) + "° actual=" + String(currentHeading, 1) + "°");
+        } else {
+            if (err > 0) turnRight();
+            else         turnLeft();
+        }
     } else if (stuckStep == 5 && now - stuckStart >= STUCK_FINAL_STOP_TIME) {
         stuckDetected = false;
         stuckStep = 0;  // Done, back to forward drive
         forwardLockStart = millis();
+        if (stuckPauseStart > 0) {
+            // Resume sample timer: shift sampleStart forward by the duration we were stuck.
+            unsigned long pausedFor = now - stuckPauseStart;
+            sampleStart += pausedFor;
+            Serial.println("Sample timer paused during stuck for " + String(pausedFor / 1000) + "s");
+            stuckPauseStart = 0;
+        }
         Serial.println("Stuck ended");
     }
 }
@@ -1060,11 +1120,20 @@ void stopCar() {
 
 void moveForwardAutonomous() {
     if (!escArmed) return;
+    // Closed-loop P-controller: hold targetHeading by biasing motor differential.
+    readHeading();
+    float err        = headingError(targetHeading, currentHeading);
+    float correction = heading_kp * err;  // err > 0 → need to turn right
+    int leftPwr  = constrain((int)(Motor_Power + correction), 0, 255);
+    int rightPwr = constrain((int)(Motor_Power - correction), 0, 255);
     escAReverse.writeMicroseconds(1200);
     escBReverse.writeMicroseconds(1200);
-    setMotorPower(Motor_Power, Motor_Power);
+    setMotorPower(leftPwr, rightPwr);
     if (millis() - lastFwdPrint >= 2000) {
-        Serial.println("        move Forward Autonomous");
+        Serial.println("AutoFwd target=" + String(targetHeading, 1) +
+                       "° actual=" + String(currentHeading, 1) +
+                       "° err=" + String(err, 1) +
+                       "° L=" + String(leftPwr) + " R=" + String(rightPwr));
         lastFwdPrint = millis();
     }
 }
@@ -1111,6 +1180,9 @@ void handleCommand(char cmd) {
         sampling = false;
         skipSampleStart = 0;
         sampleReverseHandled = false;
+        aligningAfterSample = false;
+        alignStart = 0;
+        stuckPauseStart = 0;
         Serial2.print(":C1\n");  // Task 2
         return;
     }
@@ -1139,7 +1211,10 @@ void handleCommand(char cmd) {
             sampleStart = millis();
             forwardLockStart = millis(); // Initialize so forward lock is active immediately
             sampling = false;
-            Serial.println("Autonomous mode started");
+            // Capture current compass reading as locked target heading
+            readHeading();
+            targetHeading = currentHeading;
+            Serial.println("Autonomous mode started — locked target heading = " + String(targetHeading, 1) + "°");
         }
     } else if (manualMode) {
         if (cmd == 'F') moveForward();
@@ -1162,7 +1237,8 @@ void handleCommand(char cmd) {
         else if (cmd == '4') Serial2.print(":P4\n");
         else if (cmd == '5') Serial2.print(":P5\n");
     } else if (autonomousMode) {
-        if (cmd == 'C') stuckDetected = true;
+        // Manual stuck triggers are now CL / CR (handled in handleCommandPath()).
+        // The bare 'C' command has been removed in favour of explicit left/right triggers.
     }
 }
 
@@ -1193,14 +1269,17 @@ String getCurrentMode() {
 }
 
 String getState() {
-    if (sampling) return "WATER SAMPLE";
+    // Mirrors loop() priority: stuck > sampling > align > forward
     if (stuckDetected) {
         if (stuckStep == 1) return "STOP1";
         if (stuckStep == 2) return "REVERSE";
         if (stuckStep == 3) return "STOP2";
-        if (stuckStep == 4) return String("TURN ") + (turnDirection == 'L' ? "LEFT" : "RIGHT") + " " + String(currentTurnDuration) + "ms";
+        if (stuckStep == 4) return "TURN→" + String((int)targetHeading) + "°";
         if (stuckStep == 5) return "FINAL STOP";
+        return "STUCK";  // step 0 — transient, before first handleStuckNonBlocking() iteration
     }
+    if (sampling) return "WATER SAMPLE";
+    if (aligningAfterSample) return "ALIGN→" + String((int)targetHeading) + "°";
     if (millis() - forwardLockStart < forward_lock_ms) return "FORWARD LOCK " + String(forward_lock_ms) + "ms";
     return "FORWARD";
 }
@@ -1216,10 +1295,40 @@ int checkSwitches() {
     return 0;
 }
 
-void setTurnDirection(int switchHit) {
-    if (switchHit == 1) turnDirection = 'R';      // Left hit -> turn right
-    else if (switchHit == 5) turnDirection = 'L'; // Right hit -> turn left
-    else turnDirection = random(0, 2) ? 'L' : 'R'; // Front -> random
+// -------------------- Magnetometer Heading Helpers --------------------
+void readHeading() {
+    sensors_event_t event;
+    mag.getEvent(&event);
+    float h = atan2(event.magnetic.y, event.magnetic.x) * 180 / PI;
+    h += 4.0;  // Magnetic declination East
+    if (h < 0)   h += 360;
+    if (h >= 360) h -= 360;
+    currentHeading = h;
+}
+
+float headingError(float target, float current) {
+    float diff = target - current;
+    while (diff > 180)  diff -= 360;
+    while (diff < -180) diff += 360;
+    return diff;  // -180..+180; positive = need to turn right (CW)
+}
+
+// Computes new target heading for stuck recovery turn.
+// Right obstacle (5)  → subtract angle (turn LEFT, CCW)
+// Left  obstacle (1)  → add angle      (turn RIGHT, CW)
+// Front obstacle (3)  → add angle      (always turn RIGHT)
+void computeStuckTurnTarget(int switchHit) {
+    long randomAngle = random((long)min_turn_angle, (long)max_turn_angle + 1);
+    float prevTarget = targetHeading;
+    if (switchHit == 5) {
+        targetHeading = targetHeading - (float)randomAngle;
+    } else {  // switchHit == 1 or 3
+        targetHeading = targetHeading + (float)randomAngle;
+    }
+    while (targetHeading >= 360) targetHeading -= 360;
+    while (targetHeading < 0)    targetHeading += 360;
+    Serial.println("Stuck switch=" + String(switchHit) + " angle=" + String(randomAngle)
+                   + "° prev=" + String(prevTarget, 1) + "° new=" + String(targetHeading, 1) + "°");
 }
 
 void updateLED() {
@@ -1236,18 +1345,14 @@ void updateLED() {
 }
 
 void handleStatus() {
-    sensors_event_t event;
-    mag.getEvent(&event);
-    lastHeading = atan2(event.magnetic.y, event.magnetic.x) * 180 / PI;
-    lastHeading += 4.0; // Apply 4 degrees East declination
-    if (lastHeading < 0)   lastHeading += 360;
-    if (lastHeading >= 360) lastHeading -= 360;
+    readHeading();
 
     String status = "";
     status += "MODE:"         + getCurrentMode()                      + "\n";
     status += "LEFT:"         + String(lastLeft)                      + "\n";
     status += "RIGHT:"        + String(lastRight)                     + "\n";
-    status += "ANGLE:"        + String((int)lastHeading)              + "\n";
+    status += "ANGLE:"        + String((int)currentHeading)           + "\n";
+    status += "TARGET:"       + String((int)targetHeading)            + "\n";
     status += "STUCK:"        + String(stuckDetected ? "True":"False")+ "\n";
     status += "STATE:"        + getState()                            + "\n";
     status += "SWITCH_HIT:"   + String(checkSwitches())               + "\n";
@@ -1256,9 +1361,198 @@ void handleStatus() {
     server.send(200, "text/plain", status);
 }
 
+// =====================================================================
+//  CSV Mission Logger — LittleFS, append-only, 2 Hz, non-blocking
+//  - File handle stays open for the whole autonomous mission
+//  - Rows batched in a small String buffer; flushed every ~6 rows
+//  - Sequence number persists across reboots via /log_counter.txt
+//  - Entry/exit edges detected against autonomousMode flag inside
+//    updateLogger() — no coupling to T / S / mode-exit handlers
+// =====================================================================
+
+// Read persistent log sequence number. Returns 0 if file missing.
+uint32_t readLogCounter() {
+    if (!LittleFS.exists(LOG_COUNTER_PATH)) return 0;
+    File f = LittleFS.open(LOG_COUNTER_PATH, "r");
+    if (!f) return 0;
+    uint32_t n = (uint32_t)f.parseInt();
+    f.close();
+    return n;
+}
+
+// Persist current log sequence number BEFORE opening the file, so a
+// crash mid-mission never causes filename reuse after reboot.
+void writeLogCounter(uint32_t n) {
+    File f = LittleFS.open(LOG_COUNTER_PATH, "w");
+    if (!f) {
+        Serial.println("LOG: failed to write counter");
+        return;
+    }
+    f.printf("%u\n", (unsigned)n);
+    f.close();
+}
+
+// "/log_NNN.csv" — zero-padded to 3 digits. Grows naturally past 999.
+String makeLogPath(uint32_t n) {
+    char buf[24];
+    snprintf(buf, sizeof(buf), "/log_%03u.csv", (unsigned)n);
+    return String(buf);
+}
+
+// Commit RAM buffer to flash. Cheap if buffer is empty.
+void flushLogBuffer() {
+    if (!logFile || logBuffer.length() == 0) return;
+    logFile.print(logBuffer);
+    logFile.flush();      // forces commit to flash — survives power loss from here
+    logBuffer = "";
+}
+
+// Open a new log file at the next sequence number and write the header.
+void startNewLog() {
+    logSeqNum = readLogCounter() + 1;
+    writeLogCounter(logSeqNum);              // persist BEFORE open
+    String path = makeLogPath(logSeqNum);
+    logFile = LittleFS.open(path, "w");
+    if (!logFile) {
+        Serial.println("LOG: failed to open " + path);
+        return;
+    }
+    logFile.println(LOG_CSV_HEADER);
+    logFile.flush();
+    logBuffer = "";
+    logBuffer.reserve(LOG_FLUSH_BYTES + 256);  // one-shot allocation; prevents per-row realloc/fragmentation
+    Serial.println("LOG: started " + path);
+}
+
+// Mission-end cleanup. Flush remaining buffer + close so FS is consistent.
+void stopLog() {
+    flushLogBuffer();
+    if (logFile) {
+        logFile.close();
+        Serial.println("LOG: closed " + makeLogPath(logSeqNum));
+    }
+}
+
+// Build one CSV row and append to buffer; flush immediately.
+// snprintf into a small stack buffer — no heap churn per row.
+// Flushing every row caps worst-case data loss at one sample period (~500ms)
+// and is well within ESP32 flash endurance (decades of continuous logging).
+void writeLogRow() {
+    if (!logFile) return;
+
+    unsigned long now = millis();
+    float runtimeSec  = (float)(now - autoStartMs) / 1000.0f;
+    float err         = headingError(targetHeading, currentHeading);
+    int   switchHit   = checkSwitches();     // 0=none / 1=left / 3=front / 5=right (live debounced read)
+
+    // SampleIntervalRemaining is logically paused during stuck recovery.
+    // sampleStart is only shifted in handleStuckNonBlocking step 5 (on exit).
+    // Until then, compensate by subtracting how long we've been stuck so far —
+    // gives the same value the GUI countdown shows after stuck ends.
+    unsigned long stuckSoFar = (stuckDetected && stuckPauseStart > 0)
+                             ? (now - stuckPauseStart)
+                             : 0;
+    long sampleRem = (long)sample_interval_ms
+                   - (long)((now - sampleStart) - stuckSoFar);
+    if (sampleRem < 0) sampleRem = 0;
+
+    char row[240];
+    // 14 columns: ...Stuck,SwitchHit,SampleCount,...
+    // ArduinoState wrapped in "..." in case a future state string contains a comma.
+    snprintf(row, sizeof(row),
+        "%lu,%.3f,%s,%s,%s,%d,%d,\"%s\",%.1f,%.1f,%.1f,%d,%d,%ld\n",
+        now,
+        runtimeSec,
+        getCurrentMode().c_str(),
+        getState().c_str(),
+        stuckDetected ? "true" : "false",
+        switchHit,
+        sample_count,
+        arduinoState.c_str(),
+        targetHeading,
+        currentHeading,
+        err,
+        lastLeft,
+        lastRight,
+        sampleRem);
+
+    logBuffer += row;
+    flushLogBuffer();    // commit immediately — worst-case data loss = 500 ms
+}
+
+// Single entry point called from loop(). Edge-detects autonomousMode
+// transitions and gates the 2 Hz sample rate.
+void updateLogger() {
+    if (!loggerFsReady) return;       // FS not mounted — silent no-op
+
+    // Edge UP — autonomous just started
+    if (autonomousMode && !loggerActive) {
+        startNewLog();
+        if (logFile) {
+            loggerActive = true;
+            autoStartMs  = millis();
+            lastLogMs    = 0;       // force first row immediately
+        }
+        return;
+    }
+    // Edge DOWN — autonomous just ended (STOP, sample limit, mode change, etc)
+    if (!autonomousMode && loggerActive) {
+        stopLog();
+        loggerActive = false;
+        return;
+    }
+    // Steady-state — 2 Hz row write
+    if (loggerActive && (millis() - lastLogMs >= 500)) {
+        writeLogRow();
+        lastLogMs = millis();
+    }
+}
+
+// -------- HTTP: GET /logs → simple HTML index page --------
+void handleLogList() {
+    if (!loggerFsReady) {
+        server.send(503, "text/plain",
+                    "LittleFS not mounted — logger disabled. Existing logs preserved.");
+        return;
+    }
+    String out =
+        "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>SRV-01 Logs</title><style>body{font-family:sans-serif;background:#0c1116;color:#e0e0e0;padding:20px}"
+        "a{color:#4cb}li{margin:6px 0}</style></head><body><h2>SRV-01 Mission Logs</h2>";
+    out += "<p>LittleFS: " + String(LittleFS.usedBytes()) + " / "
+         + String(LittleFS.totalBytes()) + " bytes used</p><ul>";
+    File root = LittleFS.open("/");
+    File f = root.openNextFile();
+    while (f) {
+        String name = f.name();
+        // LittleFS may return name with or without leading "/"
+        String base = name.startsWith("/") ? name.substring(1) : name;
+        if (base.startsWith("log_") && base.endsWith(".csv")) {
+            out += "<li><a href='/" + base + "'>" + base + "</a>  ("
+                 + String(f.size()) + " bytes)</li>";
+        }
+        f = root.openNextFile();
+    }
+    out += "</ul><p><a href='/'>&larr; Back to control</a></p></body></html>";
+    server.send(200, "text/html", out);
+}
+
 void handleCommandPath() {
     String msg = server.uri().substring(1);
     msg.trim();
+
+    // -------- Serve log files: /log_NNN.csv --------
+    if (msg.startsWith("log_") && msg.endsWith(".csv")) {
+        if (!loggerFsReady) { server.send(503, "text/plain", "FS not mounted"); return; }
+        String path = "/" + msg;
+        if (!LittleFS.exists(path)) { server.send(404, "text/plain", "Not found"); return; }
+        File f = LittleFS.open(path, "r");
+        if (!f) { server.send(500, "text/plain", "Open failed"); return; }
+        server.streamFile(f, "text/csv");
+        f.close();
+        return;
+    }
+
     if (msg.length() == 1) {
         handleCommand(msg[0]);
     } else {
@@ -1286,12 +1580,21 @@ void handleCommandPath() {
         } else if (msg.startsWith("E:")) {
             debounce_ms = constrain(msg.substring(2).toInt(), 0, 50);
             Serial.println("Debounce: " + String(debounce_ms));
-        } else if (msg.startsWith("N:")) {
-            min_turn_ms = msg.substring(2).toInt();
-            Serial.println("Min Turn: " + String(min_turn_ms));
-        } else if (msg.startsWith("W:")) {
-            max_turn_ms = msg.substring(2).toInt();
-            Serial.println("Max Turn: " + String(max_turn_ms));
+        } else if (msg.startsWith("MA:")) {
+            min_turn_angle = (unsigned long)constrain(msg.substring(3).toInt(), 5, 180);
+            Serial.println("Min Turn Angle: " + String(min_turn_angle) + "°");
+        } else if (msg.startsWith("XA:")) {
+            max_turn_angle = (unsigned long)constrain(msg.substring(3).toInt(), 5, 180);
+            Serial.println("Max Turn Angle: " + String(max_turn_angle) + "°");
+        } else if (msg.startsWith("TT:")) {
+            turn_tolerance_deg = constrain(msg.substring(3).toFloat(), 1.0, 30.0);
+            Serial.println("Turn Tolerance: " + String(turn_tolerance_deg, 1) + "°");
+        } else if (msg.startsWith("KP:")) {
+            heading_kp = constrain(msg.substring(3).toFloat(), 0.1, 10.0);
+            Serial.println("Heading Kp: " + String(heading_kp, 2));
+        } else if (msg.startsWith("TM:")) {
+            turn_timeout_ms = (unsigned long)constrain(msg.substring(3).toInt(), 1, 30) * 1000;
+            Serial.println("Turn Timeout: " + String(turn_timeout_ms / 1000) + "s");
         } else if (msg.startsWith("F:")) {
             forward_lock_ms = msg.substring(2).toInt();
             Serial.println("Forward Lock: " + String(forward_lock_ms));
@@ -1325,6 +1628,20 @@ void handleCommandPath() {
         } else if (msg.startsWith("RSD:")) {
             reverse_after_sample_duration = (unsigned long)constrain(msg.substring(4).toInt(), 0, 30);
             Serial.println("Reverse after sample: " + String(reverse_after_sample_duration) + "s");
+        } else if (msg == "CL") {
+            // Manual stuck trigger — boat turns LEFT
+            if (autonomousMode) {
+                stuckDetected = true;
+                computeStuckTurnTarget(5);  // 5 = right-switch semantics → boat turns LEFT (CCW)
+                Serial.println("Manual stuck trigger: LEFT");
+            }
+        } else if (msg == "CR") {
+            // Manual stuck trigger — boat turns RIGHT
+            if (autonomousMode) {
+                stuckDetected = true;
+                computeStuckTurnTarget(1);  // 1 = left-switch semantics → boat turns RIGHT (CW)
+                Serial.println("Manual stuck trigger: RIGHT");
+            }
         }
     }
     server.send(200, "text/plain", "OK");
@@ -1354,6 +1671,21 @@ void setup() {
     WiFi.softAP(ssid, password);
     Serial.println("Wi-Fi AP Started. IP: " + WiFi.softAPIP().toString());
     Wire.begin();
+
+    // LittleFS for mission logging — do NOT auto-format on mount failure
+    // (would silently wipe existing logs). Logger silently disables itself
+    // instead; autonomous mode still works without logging.
+    if (!LittleFS.begin(false)) {
+        Serial.println("LittleFS mount FAILED — logger DISABLED for this boot."
+                       " Existing logs preserved. To format a virgin device,"
+                       " flash a one-shot LittleFS.format() sketch.");
+        loggerFsReady = false;
+    } else {
+        loggerFsReady = true;
+        Serial.println("LittleFS mounted. Total=" + String(LittleFS.totalBytes())
+                       + " Used=" + String(LittleFS.usedBytes()));
+    }
+
     if (!mag.begin()) {
         Serial.println("Magnetometer initialization failed!");
         while (1);
@@ -1362,6 +1694,7 @@ void setup() {
 
     server.on("/",       HTTP_GET, handleRoot);
     server.on("/status", HTTP_GET, handleStatus);
+    server.on("/logs",   HTTP_GET, handleLogList);
     server.onNotFound(handleCommandPath);
     server.begin();
     Serial2.begin(115200, SERIAL_8N1, RXD2, TXD2); // UART to Arduino
@@ -1391,6 +1724,11 @@ void loop() {
     // Update LED
     updateLED();
 
+    // Mission logger — non-blocking, 2 Hz, only active in autonomous mode.
+    // Edge-detects autonomousMode transitions internally; no coupling to
+    // motor/sample logic below.
+    updateLogger();
+
     if (stopMode) {
         stopCar();
     } else if (manualMode) {
@@ -1404,9 +1742,12 @@ void loop() {
             Serial.println("Stuck detected");
             handleStuckNonBlocking();
         } else if (sampling) {
-            stopCar();
+            // NOTE: do NOT stopCar() here. Both branches below begin with moveBackward()
+            // for `reverse_after_sample_duration` seconds (kills forward momentum BEFORE
+            // the sample wait). A pre-stop here was overriding the no-sampler reverse on
+            // every loop iteration and clobbering the real-Uno reverse on first entry.
             if (isWaterSamplerOnBoard) {
-                performAutoSample();                          // unchanged path
+                performAutoSample();                          // calls moveBackward() internally
             } else {
                 // Non-blocking simulated sample
                 if (skipSampleStart == 0) {
@@ -1435,6 +1776,8 @@ void loop() {
                         sample_count++;
                         sampleStart          = millis();
                         sampling             = false;
+                        aligningAfterSample  = true;             // Realign to targetHeading before forward
+                        alignStart           = millis();
                         skipSampleStart      = 0;
                         sampleReverseHandled = false;
                         arduinoState         = "Sample Done";  // GUI countdown resets on this state
@@ -1447,12 +1790,30 @@ void loop() {
                     }
                 }   // end else (timing checks)
             }   // end else (!isWaterSamplerOnBoard)
+        } else if (aligningAfterSample) {
+            // Post-sample alignment: turn under closed-loop heading control until error
+            // is within tolerance, then resume forward. Boat may have rotated during the
+            // sample wait — this re-acquires the locked targetHeading before forward.
+            readHeading();
+            float err     = headingError(targetHeading, currentHeading);
+            bool reached  = fabs(err) < turn_tolerance_deg;
+            bool timedOut = (millis() - alignStart) >= turn_timeout_ms;
+            if (reached || timedOut) {
+                stopCar();
+                aligningAfterSample = false;
+                forwardLockStart    = millis();   // grace period before microswitches re-engage
+                Serial.println(reached ? "Post-sample aligned" : "Post-sample align TIMEOUT");
+                Serial.println("  err=" + String(err, 1) + "° actual=" + String(currentHeading, 1) + "°");
+            } else {
+                if (err > 0) turnRight();
+                else         turnLeft();
+            }
         } else {
             moveForwardAutonomous();
             int switchHit = checkSwitches();
             if (switchHit > 0 && millis() - forwardLockStart >= forward_lock_ms) {
                 stuckDetected = true;
-                setTurnDirection(switchHit);
+                computeStuckTurnTarget(switchHit);
                 lastDebounceTime = millis();
             } else if (millis() - sampleStart >= sample_interval_ms) {
                 sampling = true;
